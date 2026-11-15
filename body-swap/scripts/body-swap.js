@@ -29,10 +29,88 @@ const mindName = entry => setting('showPlayerNames') && entry.users.length
 const chatPortrait = entry => `<img src="${esc(entry.portrait || 'icons/svg/mystery-man.svg')}" alt="${esc(entry.name)}" title="${esc(entry.name)}" style="width:40px;height:40px;object-fit:contain;border:0;flex-shrink:0">`;
 const combatants = () => (game.combats?.contents ?? []).flatMap(combat => [...combat.combatants]);
 
+function remainingTime(deadline) {
+  const seconds = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+}
+function chatTimerText() {
+  const session = state();
+  let text = 'Body Swap — no active swap';
+  if (session.phase === 'active') text = session.expires
+    ? `Body Swap — ${Date.now() >= session.expires ? 'Time expired — awaiting GM' : remainingTime(session.expires) + ' remaining'}`
+    : 'Body Swap — active (manual reversion)';
+  else if (session.phase === 'rolling') text = 'Body Swap — waiting for Constitution rolls';
+  else if (session.phase) text = 'Body Swap — restoring or preparing bodies';
+  if (setting('automaticSwaps')) {
+    const schedule = setting('automaticSchedule');
+    text += `\nAutomatic swap — ${schedule?.next ? (Date.now() >= schedule.next ? 'due — awaiting GM / rolls' : 'in ' + remainingTime(schedule.next)) : 'waiting for a manual swap'}`;
+  }
+  return text;
+}
+function mountChatTimer(root) {
+  if (!root?.querySelector) return;
+  let panel = root.querySelector('[data-body-swap-timer]');
+  if (!panel) {
+    const anchor = root.querySelector('#chat-controls') ?? root.querySelector('#chat-form');
+    if (!anchor) return;
+    panel = root.ownerDocument.createElement('div');
+    panel.dataset.bodySwapTimer = '';
+    panel.setAttribute('role', 'timer');
+    panel.style.cssText = 'flex:0 0 auto;position:sticky;bottom:0;z-index:1;padding:8px 10px;margin:4px 0;border:1px solid #80725b;border-radius:6px;background:#29251f;color:#fff1d2;font-weight:600;white-space:pre-line;text-align:center';
+    // Outside the scrolling/deletable message log, above the chat controls.
+    anchor.parentNode.insertBefore(panel, anchor);
+  }
+  panel.textContent = chatTimerText();
+}
+Hooks.on('renderChatLog', (_app, html) => mountChatTimer(html[0] ?? html));
+
+const automaticMinutes = () => {
+  const value = Number(setting('automaticMinutes'));
+  return Number.isFinite(value) && value > 0 ? Math.max(1, value) : 30;
+};
+async function syncAutomaticSchedule() {
+  if (!primary()) return;
+  const schedule = copy(setting('automaticSchedule'));
+  const enabled = setting('automaticSwaps');
+  const minutes = automaticMinutes();
+  if (schedule.enabled !== enabled || schedule.minutes !== minutes) {
+    await game.settings.set(ID, 'automaticSchedule', { ...schedule, enabled, minutes,
+      next: enabled && schedule.tokens?.length >= 2 ? Date.now() + minutes * 60000 : null });
+  }
+}
+async function rememberAutomaticParticipants(entries) {
+  const enabled = setting('automaticSwaps');
+  const minutes = automaticMinutes();
+  await game.settings.set(ID, 'automaticSchedule', { enabled, minutes,
+    tokens: entries.map(entry => entry.token), next: enabled ? Date.now() + minutes * 60000 : null });
+}
+async function runAutomaticSwap() {
+  await syncAutomaticSchedule();
+  const schedule = copy(setting('automaticSchedule'));
+  if (!setting('automaticSwaps') || !schedule.next || Date.now() < schedule.next) return;
+  const current = state();
+  // Wait for resistance and recovery; never stack swaps or replay missed intervals.
+  if (current.phase && current.phase !== 'active') return;
+  await game.settings.set(ID, 'automaticSchedule', { ...schedule, next: Date.now() + automaticMinutes() * 60000 });
+  const tokens = [];
+  for (const uuid of schedule.tokens ?? []) {
+    const token = await fromUuid(uuid);
+    if (!token) throw new Error('An automatic-swap participant is missing. Run a new manual swap to choose participants.');
+    tokens.push(token);
+  }
+  if (tokens.length < 2) throw new Error('Automatic swaps need at least two saved participants.');
+  if (current.phase === 'active') await revert();
+  await start(tokens, undefined, { automatic: true });
+}
+
 Hooks.once('init', () => {
   const register = (key, name, type, defaultValue, hint, extra = {}) => game.settings.register(ID, key, {
     name, hint, scope: 'world', config: true, type, default: defaultValue, ...extra
   });
+  const scheduleChanged = () => { if (primary()) serialized(syncAutomaticSchedule); };
+  register('automaticSwaps', 'Automatic swaps', Boolean, false, 'Randomly reshuffle the participants from the last manual swap at a real-world interval. Existing swaps revert first. Requires an active GM; pending Constitution rolls delay the next swap. Turning this off stops future swaps, not the current swap.', { onChange: scheduleChanged });
+  register('automaticMinutes', 'Automatic swaps every X minutes (real time)', Number, 30, 'Recommended: 30 minutes. Minimum: 1 minute. Changing this restarts the countdown. Run a manual swap once to choose participants.', { onChange: scheduleChanged });
+  game.settings.register(ID, 'automaticSchedule', { scope: 'world', config: false, type: Object, default: {} });
   register('sharedVision', 'Shared vision', Boolean, false, 'Preserve existing player permissions and give every non-GM account (including offline players) Owner access to bodies occupied by swapped players. This also permits controlling and editing those bodies. Applies to new swaps; reversion restores original permissions.');
   register('showPlayerNames', 'Show player names', Boolean, false, 'Add account names after character names, e.g. Brother (Josh), in assignments, swap chat, and temporary token/initiative names. Off by default. Applies to new swaps; existing swaps keep their names until reverted.');
   register('includeEnemies', 'Include enemies and unassigned bodies', Boolean, false, 'Off: only bodies assigned to a non-GM player are eligible. On: selected NPCs can participate; their minds remain GM-controlled.');
@@ -163,7 +241,7 @@ function openAssignments() {
   dialog.render(true);
 }
 
-async function start(chosenTokens, chosenPlan) {
+async function start(chosenTokens, chosenPlan, { automatic = false } = {}) {
   requireGM();
   if (state().phase) throw new Error('A swap or roll request already exists. Revert or cancel it first.');
   const tokens = chosenTokens ?? canvas.tokens.controlled.map(t => t.document);
@@ -206,6 +284,7 @@ async function start(chosenTokens, chosenPlan) {
     }
     session.phase = setting('resistance') ? 'rolling' : 'ready';
     await save(session);
+    if (!automatic) await rememberAutomaticParticipants(session.entries);
     if (session.phase === 'rolling') {
       const buttons = session.entries.map(e => `<div style="margin:12px 0"><div style="display:flex;align-items:center;gap:8px">${chatPortrait(e)}<span style="min-width:0;overflow-wrap:break-word">${esc(e.name)}</span></div><button style="display:block;width:100%;margin-top:6px" type="button" data-body-swap-roll="${esc(e.token)}">Roll Constitution</button></div>`).join('');
       await chat(`<h3>Bodies are swapping!</h3><p>Roll a Constitution ${session.rollType === 'save' ? 'saving throw' : 'check'} against DC ${session.dc}. Success keeps you in your body.</p>${buttons}`, { request: session.id });
@@ -450,6 +529,8 @@ Hooks.once('ready', () => {
     }
   };
   if (game.system.id !== 'dnd5e') ui.notifications.error('Body Swap requires D&D 5e.');
+  globalThis.document?.querySelectorAll('#chat').forEach(mountChatTimer);
+  if (primary()) serialized(syncAutomaticSchedule);
   // A persisted journal also supports manual recovery after browser/server interruption.
   setInterval(() => {
     if (!primary()) return;
@@ -457,9 +538,11 @@ Hooks.once('ready', () => {
       const session = state();
       if (session.phase === 'active' && session.expires && Date.now() >= session.expires) await revert();
       if (session.phase === 'rolling') for (const message of game.messages.contents) await acceptRoll(message);
+      await runAutomaticSwap();
     });
   }, 5000);
   setInterval(() => {
+    globalThis.document?.querySelectorAll('#chat').forEach(mountChatTimer);
     globalThis.document?.querySelectorAll('[data-body-swap-active]').forEach(updateActiveControl);
     globalThis.document?.querySelectorAll('[data-body-swap-roll]').forEach(updateRollControl);
   }, 1000);

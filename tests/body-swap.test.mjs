@@ -45,19 +45,19 @@ async function harness({ resistance = false, enemy = false } = {}) {
   actors.get = id => actors.find(a => a.id === id);
   const tokens = actors.map((actor, i) => ({ uuid: `Scene.s.Token.t${i}`, name: actor.name, displayName: 20, texture: { src: `tokens/t${i}.png` }, update: updateDocument, actor, actorId: actor.id, actorLink: true }));
   for (const token of tokens) documents.set(token.uuid, token);
-  let interval, dialog;
+  let interval, dialog, sessionId = 0;
   const canvas = { scene: { id: 's' }, tokens: { controlled: tokens.map(document => ({ document })), placeables: tokens.map(document => ({ document })) } };
   const module = {};
   const context = vm.createContext({
     cycle, transferredOwnership, esc: escapeHTML, reassign, restrictPlan, console, Set, Map, Date,
-    foundry: { utils: { deepClone: clone, randomID: () => 'session-1' } },
+    foundry: { utils: { deepClone: clone, randomID: () => `session-${++sessionId}` } },
     game: { settings: { register: (_, key, opts) => settings.set(key, clone(opts.default)), get: (_, key) => settings.get(key), set: async (_, key, value) => { settings.set(key, clone(value)); } }, users, user: gm, actors, combats: { contents: [] }, packs: [], system: { id: 'dnd5e' }, modules: { get: () => module }, messages: { contents: messages } },
     canvas,
     Dialog: class { constructor(data) { dialog = data; } render() {} },
     setTimeout,
     Hooks: { once: (name, fn) => hooks.set(name, fn), on: (name, fn) => hooks.set(name, fn) },
     ui: { notifications: { error() {}, info() {}, warn() {} } },
-    ChatMessage: { getSpeaker: ({ actor }) => ({ actor: actor.id }), create: async data => { messages.push(data); return data; } },
+    ChatMessage: { getSpeaker: ({ actor }) => ({ actor: actor.id }), create: async data => { data.getFlag = (scope, key) => data.flags?.[scope]?.[key]; messages.push(data); return data; } },
     fromUuid: async uuid => documents.get(uuid),
     setInterval: (fn, duration) => { if (duration === 5000) interval = fn; }
   });
@@ -533,4 +533,108 @@ test('cancelled player roll can retry and the GM can roll for an NPC', async () 
   await h.api.cancel();
   await button.click();
   assert.equal(button.disabled, true);
+});
+
+
+async function tick(h) {
+  h.interval();
+  await new Promise(resolve => setTimeout(resolve, 15));
+}
+
+test('automatic swaps default off at 30 minutes and reuse only saved manual participants', async () => {
+  const h = await harness();
+  assert.equal(h.settings.get('automaticSwaps'), false);
+  assert.equal(h.settings.get('automaticMinutes'), 30);
+  h.settings.set('automaticSwaps', true);
+  h.canvas.tokens.controlled = h.canvas.tokens.controlled.slice(0, 2);
+  const originalOwnership = structuredClone(h.actors.map(a => a.ownership));
+  await h.api.start();
+  const first = h.api.status().id;
+  const schedule = structuredClone(h.settings.get('automaticSchedule'));
+  assert.deepEqual(schedule.tokens, h.tokens.slice(0, 2).map(t => t.uuid));
+  assert.ok(schedule.next > Date.now() + 1799000 && schedule.next <= Date.now() + 1800000);
+  // A ready/reconnect check preserves the persisted deadline.
+  h.hooks.get('ready')();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(h.settings.get('automaticSchedule').next, schedule.next);
+  h.canvas.tokens.controlled = [];
+  h.settings.get('automaticSchedule').next = Date.now() - 3600000;
+  await tick(h);
+  assert.equal(h.api.status().phase, 'active');
+  assert.notEqual(h.api.status().id, first);
+  assert.equal(h.api.status().entries.length, 2);
+  assert.equal(h.messages.filter(m => m.flags?.['body-swap']?.active).length, 2);
+  assert.equal(h.players[2].character.id, 'a2');
+  assert.ok(h.settings.get('automaticSchedule').next > Date.now());
+  await h.api.revert();
+  assert.deepEqual(h.actors.map(a => a.ownership), originalOwnership);
+  assert.deepEqual(h.tokens.map(t => t.name), ['Body 0', 'Body 1', 'Body 2']);
+});
+
+test('automatic swaps wait for rolls and an active GM; disabling stops the schedule', async () => {
+  const h = await harness({ resistance: true });
+  h.settings.set('automaticSwaps', true);
+  await h.api.start();
+  const id = h.api.status().id;
+  const due = Date.now() - 1000;
+  h.settings.get('automaticSchedule').next = due;
+  await tick(h);
+  assert.equal(h.api.status().id, id);
+  assert.equal(h.settings.get('automaticSchedule').next, due);
+  await h.api.cancel();
+  h.game.user = h.players[0];
+  await tick(h);
+  assert.equal(h.api.status().phase, undefined);
+  h.game.user = h.gm;
+  await tick(h);
+  assert.equal(h.api.status().phase, 'rolling');
+  assert.notEqual(h.api.status().id, id);
+  h.settings.set('automaticSwaps', false);
+  await tick(h);
+  assert.equal(h.settings.get('automaticSchedule').next, null);
+  assert.equal(h.api.status().phase, 'rolling');
+  await h.api.cancel();
+});
+
+test('automatic interval changes reset countdown and missing participants do not end the current swap', async () => {
+  const h = await harness();
+  h.settings.set('automaticSwaps', true);
+  await h.api.start();
+  const id = h.api.status().id;
+  h.settings.set('automaticMinutes', 7);
+  await tick(h);
+  assert.ok(h.settings.get('automaticSchedule').next > Date.now() + 419000);
+  assert.ok(h.settings.get('automaticSchedule').next <= Date.now() + 420000);
+  h.documents.delete(h.tokens[1].uuid);
+  h.settings.get('automaticSchedule').next = Date.now() - 1;
+  await tick(h);
+  assert.equal(h.api.status().id, id);
+  assert.equal(h.api.status().phase, 'active');
+  assert.ok(h.settings.get('automaticSchedule').next > Date.now());
+});
+
+test('persistent chat timer sits outside messages and survives clearing, rerendering and reversion', async () => {
+  const h = await harness();
+  h.settings.set('duration', 120);
+  h.settings.set('automaticSwaps', true);
+  await h.api.start();
+  const panels = [];
+  const parent = { insertBefore(panel) { panels.push(panel); } };
+  const root = {
+    querySelector(selector) { return selector === '[data-body-swap-timer]' ? panels[0] : selector === '#chat-controls' ? { parentNode: parent } : null; },
+    ownerDocument: { createElement() { return { dataset: {}, style: {}, setAttribute() {} }; } }
+  };
+  h.game.user = h.players[0];
+  h.hooks.get('renderChatLog')({}, [root]);
+  assert.match(panels[0].textContent, /2:00 remaining/);
+  assert.match(panels[0].textContent, /Automatic swap — in 30:00/);
+  h.messages.length = 0;
+  h.hooks.get('renderChatLog')({}, [root]);
+  assert.equal(panels.length, 1);
+  assert.match(panels[0].textContent, /remaining/);
+  h.game.user = h.gm;
+  await h.api.revert();
+  h.hooks.get('renderChatLog')({}, [root]);
+  assert.match(panels[0].textContent, /no active swap/);
+  assert.match(panels[0].textContent, /Automatic swap/);
 });
