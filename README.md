@@ -1,4 +1,4 @@
-# Body Swap — preview 0.3.1
+# Body Swap — preview 0.3.2
 
 Target: Foundry VTT **11 build 315**, D&D 5e **2.4.1**. This preview has automated logic tests, but has not yet been tested inside a running Foundry world.
 
@@ -18,7 +18,7 @@ For manual installation:
 
 ## Use
 
-Select at least two eligible tokens and run **Swap Selected**. Each participant moves to a different selected body; the chat card shows `player name → token name`. The physical tokens stay in place. Players receive ownership of their destination Actor and their assigned character changes. Double-clicking the destination token opens its sheet using Foundry's native ownership behavior.
+Select at least two eligible tokens and run **Swap Selected**. Each participant moves to a different selected body; the chat card shows original and destination token portraits alongside `player name → body name`. The physical tokens stay in place. During the swap, each destination token is named for its incoming player (or `GM (original body)` for a GM-controlled mind), with its nameplate visible on the board. Existing initiative entries use the same name. Prototype token names are updated too; a shared sidebar Actor lists its incoming names separated by `/`. Original token names, nameplate visibility, prototype names, and existing initiative aliases are restored on reversion. Initiative entries added during the swap have inherited temporary names restored to the original body name. Players receive ownership of their destination Actor and their assigned character changes. Double-clicking the destination token opens its sheet using Foundry's native ownership behavior.
 
 With **zero or one token selected**, the same macro opens **Assign Bodies** for the current scene. Character names appear in a responsive grid with a destination dropdown under each name. The initial assignment is randomized. Change any destination and its previous occupant automatically receives the freed destination; all dropdowns update immediately, with no duplicate destinations. Click **Enable Body Swap** to apply the displayed assignments, or **Randomize** to reshuffle. Closing or cancelling the window changes nothing.
 

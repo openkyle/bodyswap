@@ -1,7 +1,9 @@
-Body Swap 0.3.1 preview for Foundry VTT 11 build 315 and D&D 5e 2.4.1.
+Body Swap 0.3.2 preview for Foundry VTT 11 build 315 and D&D 5e 2.4.1.
 
-Unlinked scene tokens from the same sidebar Actor can now participate as separate bodies, retaining their individual HP, items, and effects. Incoming players receive combined access to the shared sidebar Actor and individual permissions on their destination scene bodies. Reversion restores original permissions and character assignments.
+Swap chat cards now show original and destination token portraits. Constitution request cards show body portraits too, with Actor-image or placeholder fallbacks for missing art and video textures.
 
-Linked tokens sharing one Actor still represent one body. A player account cannot participate through multiple starting bodies. Other tokens using the shared sidebar Actor may inherit its broader access.
+Destination scene tokens and existing initiative entries are renamed for their incoming players. Nameplates are visible on the board during the swap. Prototype token names also change; shared sidebar Actors list the incoming names together while each scene token keeps its individual incoming name.
 
-All 16 automated tests pass, including shared-Actor swaps and restoration. Live Foundry testing is pending.
+Reversion restores original names, nameplate visibility, prototype names, and existing initiative aliases. Initiative entries added during the swap have inherited temporary names restored. Recovery data is saved before any name or permission changes.
+
+All 18 automated tests pass. Live Foundry testing is pending.

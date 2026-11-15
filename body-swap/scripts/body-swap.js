@@ -19,6 +19,14 @@ async function chat(content, flags) {
   return ChatMessage.create({ content, speaker: { alias: 'Body Swap' }, ...(flags ? { flags: { [ID]: flags } } : {}) });
 }
 
+function tokenPortrait(token) {
+  const src = token.texture?.src;
+  return (src && !/\.(webm|mp4)(?:[?#]|$)/i.test(src) ? src : token.actor?.img) || 'icons/svg/mystery-man.svg';
+}
+const mindName = entry => entry.users.length ? entry.users.map(id => game.users.get(id).name).join(', ') : `GM (${entry.name})`;
+const chatPortrait = entry => `<img src="${esc(entry.portrait || 'icons/svg/mystery-man.svg')}" alt="${esc(entry.name)}" title="${esc(entry.name)}" style="width:40px;height:40px;object-fit:contain;border:0;flex-shrink:0">`;
+const combatants = () => (game.combats?.contents ?? []).flatMap(combat => [...combat.combatants]);
+
 Hooks.once('init', () => {
   const register = (key, name, type, defaultValue, hint, extra = {}) => game.settings.register(ID, key, {
     name, hint, scope: 'world', config: true, type, default: defaultValue, ...extra
@@ -75,10 +83,7 @@ function openAssignments() {
   };
   let plan = randomPlan();
   let dialog;
-  const portrait = row => {
-    const src = row.token.texture?.src;
-    return (src && !/\.(webm|mp4)(?:[?#]|$)/i.test(src) ? src : row.token.actor?.img) || 'icons/svg/mystery-man.svg';
-  };
+  const portrait = row => tokenPortrait(row.token);
   const imageStyle = size => `width:${size}px;height:${size}px;object-fit:contain;border:0;display:block;margin:0 auto`;
   const options = eligible.map(row => `<option value="${esc(row.token.uuid)}">${esc(row.label)}</option>`).join('');
   const cards = rows.map(row => `<section style="border:1px solid #999;border-radius:6px;padding:10px;${row.reason ? 'opacity:.55' : ''}">
@@ -181,7 +186,7 @@ async function start(chosenTokens, chosenPlan) {
         await token.update({ actorId: actor.id, actorLink: true });
         actor = token.actor;
       }
-      session.entries.push({ token: token.uuid, actor: actor.uuid, base: base?.uuid ?? actor.uuid, name: token.name, users });
+      session.entries.push({ token: token.uuid, actor: actor.uuid, base: base?.uuid ?? actor.uuid, name: token.name, portrait: tokenPortrait(token), users });
     }
     if (session.entries.length < 2) throw new Error('Fewer than two eligible bodies remain.');
     if (chosenPlan) {
@@ -198,7 +203,7 @@ async function start(chosenTokens, chosenPlan) {
     session.phase = setting('resistance') ? 'rolling' : 'ready';
     await save(session);
     if (session.phase === 'rolling') {
-      const buttons = session.entries.map(e => `<p>${esc(e.name)} <button type="button" data-body-swap-roll="${esc(e.token)}">Roll Constitution</button></p>`).join('');
+      const buttons = session.entries.map(e => `<div style="display:flex;align-items:center;gap:8px;margin:8px 0">${chatPortrait(e)}<span>${esc(e.name)}</span> <button type="button" data-body-swap-roll="${esc(e.token)}">Roll Constitution</button></div>`).join('');
       await chat(`<h3>Bodies are swapping!</h3><p>Roll a Constitution ${session.rollType === 'save' ? 'saving throw' : 'check'} against DC ${session.dc}. Success keeps you in your body.</p>${buttons}`, { request: session.id });
     } else await applySwap(session);
   } catch (error) {
@@ -247,6 +252,27 @@ async function applySwap(session) {
     session.actors.push({ uuid, ownership: copy(actor.ownership) });
     updates.set(uuid, transferredOwnership(actor.ownership, participatingUsers, [...owners]));
   }
+  // Journal cosmetic changes before any writes, alongside permission recovery.
+  session.names = [];
+  const prototypeNames = new Map();
+  for (const { source, target } of mappings) {
+    const token = await fromUuid(target.token);
+    const name = mindName(source);
+    session.names.push({ kind: 'token', uuid: token.uuid,
+      original: { name: token.name, displayName: token.displayName },
+      applied: { name, displayName: CONST.TOKEN_DISPLAY_MODES.ALWAYS } });
+    for (const combatant of combatants().filter(c => c.token?.uuid === token.uuid)) {
+      session.names.push({ kind: 'combatant', uuid: combatant.uuid, original: { name: combatant.name }, applied: { name } });
+    }
+    if (!prototypeNames.has(target.base)) prototypeNames.set(target.base, new Set());
+    prototypeNames.get(target.base).add(name);
+  }
+  for (const [uuid, names] of prototypeNames) {
+    const actor = await fromUuid(uuid);
+    session.names.push({ kind: 'prototype', uuid,
+      original: { 'prototypeToken.name': actor.prototypeToken.name },
+      applied: { 'prototypeToken.name': [...names].join(' / ') } });
+  }
   session.phase = 'applying';
   await save(session); // Persist the entire recovery journal before mutations.
   try {
@@ -255,10 +281,11 @@ async function applySwap(session) {
       const targetActor = await fromUuid(target.base);
       for (const id of source.users) await game.users.get(id).update({ character: targetActor.id });
     }
+    for (const record of session.names) await (await fromUuid(record.uuid)).update(record.applied);
     session.phase = 'active';
     session.expires = session.duration ? Date.now() + session.duration * 1000 : null;
     await save(session);
-    const rows = mappings.map(({ source, target }) => `<p>${esc(source.users.length ? source.users.map(id => game.users.get(id).name).join(', ') : `GM (${source.name})`)} → ${esc(target.name)}</p>`).join('');
+    const rows = mappings.map(({ source, target }) => `<div style="display:flex;align-items:center;gap:8px;margin:8px 0">${chatPortrait(source)}<span>${esc(mindName(source))}</span><span aria-label="becomes">→</span>${chatPortrait(target)}<span>${esc(target.name)}</span></div>`).join('');
     await chat(`<h3>Body Swap</h3>${rows}<p><span data-body-swap-active="${esc(session.id)}">${session.expires ? 'Timer running' : 'Active — manual reversion'}</span></p><button type="button" data-body-swap-active="${esc(session.id)}" hidden>Revert now</button>`, { active: session.id });
   } catch (error) {
     await revert();
@@ -285,6 +312,19 @@ async function revert() {
     try {
       const user = game.users.get(record.id);
       if (user) await user.update({ character: record.character });
+    } catch (error) { errors.push(error.message); }
+  }
+  const recordedCombatants = new Set((session.names ?? []).filter(r => r.kind === 'combatant').map(r => r.uuid));
+  for (const record of session.names ?? []) {
+    try {
+      const document = await fromUuid(record.uuid);
+      if (document) await document.update(record.original);
+      // Combatants added during the swap inherit the temporary token name.
+      if (record.kind === 'token') for (const combatant of combatants()) {
+        if (combatant.token?.uuid === record.uuid && !recordedCombatants.has(combatant.uuid) && combatant.name === record.applied.name) {
+          await combatant.update({ name: record.original.name });
+        }
+      }
     } catch (error) { errors.push(error.message); }
   }
   for (const record of session.bindings ?? []) {

@@ -2,7 +2,7 @@
   "id": "body-swap",
   "title": "Body Swap",
   "description": "GM-triggered random body swaps with Constitution resistance, temporary ownership, and automatic reversion.",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "compatibility": {
     "minimum": "11",
     "maximum": "11"
@@ -29,5 +29,5 @@
   ],
   "url": "https://github.com/openkyle/bodyswap",
   "manifest": "https://raw.githubusercontent.com/openkyle/bodyswap/main/body-swap/module.json",
-  "download": "https://github.com/openkyle/bodyswap/releases/download/v0.3.1/body-swap.zip"
+  "download": "https://github.com/openkyle/bodyswap/releases/download/v0.3.2/body-swap.zip"
 }

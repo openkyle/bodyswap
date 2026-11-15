@@ -21,12 +21,21 @@ test('permissions override inherited control and preserve unrelated access', () 
   assert.equal(escapeHTML('<img>'), '&lt;img&gt;');
 });
 
+async function updateDocument(data) {
+  for (const [key, value] of Object.entries(data)) {
+    const path = key.split('.');
+    let target = this;
+    for (const part of path.slice(0, -1)) target = target[part] ??= {};
+    target[path.at(-1)] = structuredClone(value);
+  }
+}
+
 async function harness({ resistance = false, enemy = false } = {}) {
   const hooks = new Map(), settings = new Map(), documents = new Map(), messages = [];
   const clone = value => structuredClone(value);
   const actors = [], players = [];
   for (let i = 0; i < 3; i++) {
-    const actor = { id: `a${i}`, uuid: `Actor.a${i}`, name: `Body ${i}`, ownership: { default: 0, [`u${i}`]: 3 }, system: { hp: 20 }, async update(data) { Object.assign(this, clone(data)); } };
+    const actor = { id: `a${i}`, uuid: `Actor.a${i}`, name: `Body ${i}`, ownership: { default: 0, [`u${i}`]: 3 }, system: { hp: 20 }, img: `portraits/a${i}.png`, prototypeToken: { name: `Prototype ${i}` }, update: updateDocument };
     actors.push(actor); documents.set(actor.uuid, actor);
     players.push({ id: `u${i}`, name: `Player ${i}`, isGM: false, character: actor, async update(data) { this.character = actors.find(a => a.id === data.character) ?? null; } });
   }
@@ -34,15 +43,16 @@ async function harness({ resistance = false, enemy = false } = {}) {
   const gm = { id: 'gm', isGM: true, name: 'GM' };
   const users = [...players, gm]; users.get = id => users.find(u => u.id === id); users.activeGM = gm;
   actors.get = id => actors.find(a => a.id === id);
-  const tokens = actors.map((actor, i) => ({ uuid: `Scene.s.Token.t${i}`, name: actor.name, actor, actorId: actor.id, actorLink: true }));
+  const tokens = actors.map((actor, i) => ({ uuid: `Scene.s.Token.t${i}`, name: actor.name, displayName: 20, texture: { src: `tokens/t${i}.png` }, update: updateDocument, actor, actorId: actor.id, actorLink: true }));
   for (const token of tokens) documents.set(token.uuid, token);
   let interval, dialog;
   const canvas = { scene: { id: 's' }, tokens: { controlled: tokens.map(document => ({ document })), placeables: tokens.map(document => ({ document })) } };
   const module = {};
   const context = vm.createContext({
     cycle, transferredOwnership, esc: escapeHTML, reassign, restrictPlan, console, Set, Map, Date,
+    CONST: { TOKEN_DISPLAY_MODES: { ALWAYS: 50 } },
     foundry: { utils: { deepClone: clone, randomID: () => 'session-1' } },
-    game: { settings: { register: (_, key, opts) => settings.set(key, clone(opts.default)), get: (_, key) => settings.get(key), set: async (_, key, value) => { settings.set(key, clone(value)); } }, users, user: gm, actors, packs: [], system: { id: 'dnd5e' }, modules: { get: () => module }, messages: { contents: messages } },
+    game: { settings: { register: (_, key, opts) => settings.set(key, clone(opts.default)), get: (_, key) => settings.get(key), set: async (_, key, value) => { settings.set(key, clone(value)); } }, users, user: gm, actors, combats: { contents: [] }, packs: [], system: { id: 'dnd5e' }, modules: { get: () => module }, messages: { contents: messages } },
     canvas,
     Dialog: class { constructor(data) { dialog = data; } render() {} },
     setTimeout,
@@ -249,7 +259,7 @@ test('unlinked bodies share sidebar access without losing individual control or 
   }));
   const enemies = synthetic.map((actor, i) => ({
     uuid: `Scene.s.Token.n${i}`, name: `Goblin ${i}`, actor,
-    actorId: base.id, actorLink: false
+    actorId: base.id, actorLink: false, displayName: 0, update: updateDocument
   }));
   for (const document of [...synthetic, ...enemies]) h.documents.set(document.uuid, document);
   const tokens = [...h.tokens.slice(0, 2), ...enemies];
@@ -271,6 +281,9 @@ test('unlinked bodies share sidebar access without losing individual control or 
   dialog.buttons.apply.callback();
   await new Promise(resolve => setTimeout(resolve, 20));
   assert.equal(h.api.status().phase, 'active');
+  assert.equal(enemies[0].name, 'Player 0');
+  assert.equal(enemies[1].name, 'Player 1');
+  assert.equal(base.prototypeToken.name, 'Player 0 / Player 1');
   assert.equal(base.ownership.u0, 3);
   assert.equal(base.ownership.u1, 3);
   assert.equal(synthetic[0].ownership.u0, 3);
@@ -286,6 +299,8 @@ test('unlinked bodies share sidebar access without losing individual control or 
   assert.deepEqual([...h.actors, ...synthetic].map(a => a.ownership), originals);
   assert.deepEqual(h.players.slice(0, 2).map(p => p.character.id), ['a0', 'a1']);
   assert.deepEqual(synthetic.map(a => a.system.hp), [4, 11]);
+  assert.deepEqual(enemies.map(t => t.name), ['Goblin 0', 'Goblin 1']);
+  assert.equal(base.prototypeToken.name, 'Prototype 2');
   // Quick swapping uses the same token-level eligibility as the editor.
   h.canvas.tokens.controlled = tokens.map(document => ({ document }));
   await h.api.start();
@@ -298,5 +313,61 @@ test('multiple linked tokens for one body remain rejected', async () => {
   h.settings.set('includeEnemies', true);
   h.canvas.tokens.controlled.push({ document: { ...h.tokens[2], uuid: 'Scene.s.Token.extra' } });
   await assert.rejects(h.api.start(), /one linked token per Actor/);
+  assert.equal(h.api.status().phase, undefined);
+});
+
+
+test('chat portraits and player names follow bodies; all names and display settings revert', async () => {
+  const h = await harness();
+  h.players[0].name = 'Alice <&>';
+  h.tokens[1].texture.src = 'tokens/animated.webm';
+  h.tokens[2].texture.src = '';
+  h.actors[2].img = '';
+  const existing = h.tokens.map((token, i) => ({
+    uuid: `Combat.c.Combatant.c${i}`, token, name: `Initiative alias ${i}`,
+    initiative: 20 - i, update: updateDocument
+  }));
+  h.game.combats.contents.push({ combatants: existing });
+  for (const combatant of existing) h.documents.set(combatant.uuid, combatant);
+  const names = h.tokens.map(t => t.name);
+  const prototypes = h.actors.map(a => a.prototypeToken.name);
+  await h.api.start();
+  const card = h.messages.at(-1).content;
+  assert.equal((card.match(/<img /g) ?? []).length, 6);
+  assert.ok(card.includes('tokens/t0.png'));
+  assert.ok(card.includes('portraits/a1.png'));
+  assert.ok(card.includes('icons/svg/mystery-man.svg'));
+  assert.ok(card.includes('Alice &lt;&amp;&gt;'));
+  assert.ok(!card.includes('animated.webm'));
+  for (let i = 0; i < h.tokens.length; i++) {
+    const incoming = h.players.find(p => p.character.id === h.tokens[i].actorId);
+    assert.equal(h.tokens[i].name, incoming.name);
+    assert.equal(h.tokens[i].displayName, 50);
+    assert.equal(h.actors[i].prototypeToken.name, incoming.name);
+    assert.equal(existing[i].name, incoming.name);
+  }
+  const added = { uuid: 'Combat.later.Combatant.new', token: h.tokens[0], name: h.tokens[0].name, update: updateDocument };
+  h.game.combats.contents.push({ combatants: [added] });
+  h.documents.set(added.uuid, added);
+  // Revert reads the persisted journal, as it does following a reload.
+  await h.api.revert();
+  assert.deepEqual(h.tokens.map(t => t.name), names);
+  assert.deepEqual(h.tokens.map(t => t.displayName), [20, 20, 20]);
+  assert.deepEqual(h.actors.map(a => a.prototypeToken.name), prototypes);
+  assert.deepEqual(existing.map(c => c.name), ['Initiative alias 0', 'Initiative alias 1', 'Initiative alias 2']);
+  assert.deepEqual(existing.map(c => c.initiative), [20, 19, 18]);
+  assert.equal(added.name, names[0]);
+});
+
+test('failed renaming retains recovery and restores original names on retry', async () => {
+  const h = await harness();
+  const names = h.tokens.map(t => t.name);
+  h.tokens[1].update = async () => { throw new Error('simulated name failure'); };
+  await assert.rejects(h.api.start(), /recovery data retained/);
+  assert.equal(h.api.status().phase, 'reverting');
+  h.tokens[1].update = updateDocument;
+  await h.api.revert();
+  assert.deepEqual(h.tokens.map(t => t.name), names);
+  assert.deepEqual(h.actors.map(a => a.prototypeToken.name), ['Prototype 0', 'Prototype 1', 'Prototype 2']);
   assert.equal(h.api.status().phase, undefined);
 });
