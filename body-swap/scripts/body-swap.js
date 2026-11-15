@@ -43,7 +43,7 @@ function chatTimerText() {
   else if (session.phase) text = 'Body Swap — restoring or preparing bodies';
   if (setting('automaticSwaps')) {
     const schedule = setting('automaticSchedule');
-    text += `\nAutomatic swap — ${schedule?.next ? (Date.now() >= schedule.next ? 'due — awaiting GM / rolls' : 'in ' + remainingTime(schedule.next)) : 'waiting for a manual swap'}`;
+    text += `\nAutomatic swap — ${schedule?.next ? (Date.now() >= schedule.next ? 'due — awaiting GM / rolls' : 'in ' + remainingTime(schedule.next)) : 'starting countdown'}`;
   }
   return text;
 }
@@ -73,16 +73,16 @@ async function syncAutomaticSchedule() {
   const schedule = copy(setting('automaticSchedule'));
   const enabled = setting('automaticSwaps');
   const minutes = automaticMinutes();
-  if (schedule.enabled !== enabled || schedule.minutes !== minutes) {
-    await game.settings.set(ID, 'automaticSchedule', { ...schedule, enabled, minutes,
-      next: enabled && schedule.tokens?.length >= 2 ? Date.now() + minutes * 60000 : null });
+  if (schedule.scope !== 'activeScene' || schedule.enabled !== enabled || schedule.minutes !== minutes) {
+    await game.settings.set(ID, 'automaticSchedule', { scope: 'activeScene', enabled, minutes,
+      next: enabled ? Date.now() + minutes * 60000 : null });
   }
 }
-async function rememberAutomaticParticipants(entries) {
+async function restartAutomaticSchedule() {
   const enabled = setting('automaticSwaps');
   const minutes = automaticMinutes();
-  await game.settings.set(ID, 'automaticSchedule', { enabled, minutes,
-    tokens: entries.map(entry => entry.token), next: enabled ? Date.now() + minutes * 60000 : null });
+  await game.settings.set(ID, 'automaticSchedule', { scope: 'activeScene', enabled, minutes,
+    next: enabled ? Date.now() + minutes * 60000 : null });
 }
 async function runAutomaticSwap() {
   await syncAutomaticSchedule();
@@ -92,14 +92,21 @@ async function runAutomaticSwap() {
   // Wait for resistance and recovery; never stack swaps or replay missed intervals.
   if (current.phase && current.phase !== 'active') return;
   await game.settings.set(ID, 'automaticSchedule', { ...schedule, next: Date.now() + automaticMinutes() * 60000 });
-  const tokens = [];
-  for (const uuid of schedule.tokens ?? []) {
-    const token = await fromUuid(uuid);
-    if (!token) throw new Error('An automatic-swap participant is missing. Run a new manual swap to choose participants.');
-    tokens.push(token);
-  }
-  if (tokens.length < 2) throw new Error('Automatic swaps need at least two saved participants.');
+  const scene = game.scenes?.active;
+  if (!scene || scene.tokens.size < 2) return;
   if (current.phase === 'active') await revert();
+  // Resolve participants after reversion restores original character assignments.
+  const seenActors = new Set(), seenUsers = new Set();
+  const tokens = [...scene.tokens].filter(token => {
+    const actor = token.actor;
+    if (!actor || seenActors.has(actor.uuid)) return false;
+    const users = game.users.filter(user => !user.isGM && user.character?.id === actor.id);
+    if ((!setting('includeEnemies') && !users.length) || users.some(user => seenUsers.has(user.id))) return false;
+    seenActors.add(actor.uuid);
+    for (const user of users) seenUsers.add(user.id);
+    return true;
+  });
+  if (tokens.length < 2) return;
   await start(tokens, undefined, { automatic: true });
 }
 
@@ -108,8 +115,8 @@ Hooks.once('init', () => {
     name, hint, scope: 'world', config: true, type, default: defaultValue, ...extra
   });
   const scheduleChanged = () => { if (primary()) serialized(syncAutomaticSchedule); };
-  register('automaticSwaps', 'Automatic swaps', Boolean, false, 'Randomly reshuffle the participants from the last manual swap at a real-world interval. Existing swaps revert first. Requires an active GM; pending Constitution rolls delay the next swap. Turning this off stops future swaps, not the current swap.', { onChange: scheduleChanged });
-  register('automaticMinutes', 'Automatic swaps every X minutes (real time)', Number, 30, 'Recommended: 30 minutes. Minimum: 1 minute. Changing this restarts the countdown. Run a manual swap once to choose participants.', { onChange: scheduleChanged });
+  register('automaticSwaps', 'Automatic swaps', Boolean, false, 'Randomly reshuffle all eligible tokens on the currently active scene at a real-world interval. Include enemies controls NPC participation. Existing swaps revert first. Requires an active GM; pending Constitution rolls delay the next swap. Turning this off stops future swaps, not the current swap.', { onChange: scheduleChanged });
+  register('automaticMinutes', 'Automatic swaps every X minutes (real time)', Number, 30, 'Recommended: 30 minutes. Minimum: 1 minute. Changing this restarts the countdown. No manual swap is needed to start the schedule.', { onChange: scheduleChanged });
   game.settings.register(ID, 'automaticSchedule', { scope: 'world', config: false, type: Object, default: {} });
   register('sharedVision', 'Shared vision', Boolean, false, 'Preserve existing player permissions and give every non-GM account (including offline players) Owner access to bodies occupied by swapped players. This also permits controlling and editing those bodies. Applies to new swaps; reversion restores original permissions.');
   register('showPlayerNames', 'Show player names', Boolean, false, 'Add account names after character names, e.g. Brother (Josh), in assignments, swap chat, and temporary token/initiative names. Off by default. Applies to new swaps; existing swaps keep their names until reverted.');
@@ -284,7 +291,7 @@ async function start(chosenTokens, chosenPlan, { automatic = false } = {}) {
     }
     session.phase = setting('resistance') ? 'rolling' : 'ready';
     await save(session);
-    if (!automatic) await rememberAutomaticParticipants(session.entries);
+    if (!automatic) await restartAutomaticSchedule();
     if (session.phase === 'rolling') {
       const buttons = session.entries.map(e => `<div style="margin:12px 0"><div style="display:flex;align-items:center;gap:8px">${chatPortrait(e)}<span style="min-width:0;overflow-wrap:break-word">${esc(e.name)}</span></div><button style="display:block;width:100%;margin-top:6px" type="button" data-body-swap-roll="${esc(e.token)}">Roll Constitution</button></div>`).join('');
       await chat(`<h3>Bodies are swapping!</h3><p>Roll a Constitution ${session.rollType === 'save' ? 'saving throw' : 'check'} against DC ${session.dc}. Success keeps you in your body.</p>${buttons}`, { request: session.id });

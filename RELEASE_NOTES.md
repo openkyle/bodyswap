@@ -1,9 +1,7 @@
-Body Swap 0.3.7 preview for Foundry VTT 11 build 315 and D&D 5e 2.4.1.
+Body Swap 0.3.8 preview for Foundry VTT 11 build 315 and D&D 5e 2.4.1.
 
-Adds a persistent timer panel at the bottom of chat, outside the scrolling message log. Clearing messages does not remove it. It shows remaining swap time, manual-reversion or pending-roll status, and the next automatic-swap countdown.
+Automatic swaps now use all eligible tokens on the currently active world scene instead of participants saved by a manual swap. Enabling the setting starts the countdown immediately. Include enemies controls unassigned NPC participation. Duplicate linked bodies and repeated starting bodies for one player are skipped; scenes with fewer than two eligible bodies are skipped without opening a dialog.
 
-Adds optional Automatic swaps every X minutes (real time). Off by default, with a recommended/default 30-minute interval. Run a manual swap to choose participants; scheduled swaps reuse them, restore the previous swap, then randomize again. Manual pairings are not retained. Constitution resistance and other module settings still apply.
+The persistent current-swap timer remains available independently of automatic swaps. Automatic swaps remain off by default, with a recommended/default interval of 30 real-world minutes.
 
-Schedules survive reloads and require an active primary GM. Pending rolls and recovery delay swaps; missed intervals do not accumulate. Disabling automatic swaps stops the schedule without ending the current swap. Manual reversion alone does not disable the schedule.
-
-All 27 automated tests pass. Live Foundry layout and connected-player testing are pending.
+All 28 automated tests pass, including active-scene changes, automatic start without manual setup, empty scenes, duplicate bodies, and the timer with automatic swaps disabled. Live Foundry testing is pending.

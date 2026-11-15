@@ -51,7 +51,7 @@ async function harness({ resistance = false, enemy = false } = {}) {
   const context = vm.createContext({
     cycle, transferredOwnership, esc: escapeHTML, reassign, restrictPlan, console, Set, Map, Date,
     foundry: { utils: { deepClone: clone, randomID: () => `session-${++sessionId}` } },
-    game: { settings: { register: (_, key, opts) => settings.set(key, clone(opts.default)), get: (_, key) => settings.get(key), set: async (_, key, value) => { settings.set(key, clone(value)); } }, users, user: gm, actors, combats: { contents: [] }, packs: [], system: { id: 'dnd5e' }, modules: { get: () => module }, messages: { contents: messages } },
+    game: { settings: { register: (_, key, opts) => settings.set(key, clone(opts.default)), get: (_, key) => settings.get(key), set: async (_, key, value) => { settings.set(key, clone(value)); } }, users, user: gm, actors, scenes: { active: { tokens: new Set(tokens) } }, combats: { contents: [] }, packs: [], system: { id: 'dnd5e' }, modules: { get: () => module }, messages: { contents: messages } },
     canvas,
     Dialog: class { constructor(data) { dialog = data; } render() {} },
     setTimeout,
@@ -541,7 +541,7 @@ async function tick(h) {
   await new Promise(resolve => setTimeout(resolve, 15));
 }
 
-test('automatic swaps default off at 30 minutes and reuse only saved manual participants', async () => {
+test('automatic swaps default off at 30 minutes and include the active scene beyond manual participants', async () => {
   const h = await harness();
   assert.equal(h.settings.get('automaticSwaps'), false);
   assert.equal(h.settings.get('automaticMinutes'), 30);
@@ -551,7 +551,8 @@ test('automatic swaps default off at 30 minutes and reuse only saved manual part
   await h.api.start();
   const first = h.api.status().id;
   const schedule = structuredClone(h.settings.get('automaticSchedule'));
-  assert.deepEqual(schedule.tokens, h.tokens.slice(0, 2).map(t => t.uuid));
+  assert.equal(schedule.scope, 'activeScene');
+  assert.equal(schedule.tokens, undefined);
   assert.ok(schedule.next > Date.now() + 1799000 && schedule.next <= Date.now() + 1800000);
   // A ready/reconnect check preserves the persisted deadline.
   h.hooks.get('ready')();
@@ -562,9 +563,9 @@ test('automatic swaps default off at 30 minutes and reuse only saved manual part
   await tick(h);
   assert.equal(h.api.status().phase, 'active');
   assert.notEqual(h.api.status().id, first);
-  assert.equal(h.api.status().entries.length, 2);
+  assert.equal(h.api.status().entries.length, 3);
   assert.equal(h.messages.filter(m => m.flags?.['body-swap']?.active).length, 2);
-  assert.equal(h.players[2].character.id, 'a2');
+  assert.notEqual(h.players[2].character.id, 'a2');
   assert.ok(h.settings.get('automaticSchedule').next > Date.now());
   await h.api.revert();
   assert.deepEqual(h.actors.map(a => a.ownership), originalOwnership);
@@ -596,21 +597,43 @@ test('automatic swaps wait for rolls and an active GM; disabling stops the sched
   await h.api.cancel();
 });
 
-test('automatic interval changes reset countdown and missing participants do not end the current swap', async () => {
-  const h = await harness();
+test('automatic swaps start without manual setup and follow scene changes with eligibility rules', async () => {
+  const h = await harness({ enemy: true });
   h.settings.set('automaticSwaps', true);
-  await h.api.start();
-  const id = h.api.status().id;
   h.settings.set('automaticMinutes', 7);
   await tick(h);
   assert.ok(h.settings.get('automaticSchedule').next > Date.now() + 419000);
   assert.ok(h.settings.get('automaticSchedule').next <= Date.now() + 420000);
-  h.documents.delete(h.tokens[1].uuid);
+  h.canvas.tokens.controlled = [];
+  h.game.scenes.active = { tokens: new Set([h.tokens[1], h.tokens[2]]) };
   h.settings.get('automaticSchedule').next = Date.now() - 1;
   await tick(h);
-  assert.equal(h.api.status().id, id);
+  assert.equal(h.api.status().phase, undefined);
+  assert.equal(h.getDialog(), undefined);
+  h.settings.set('includeEnemies', true);
+  h.settings.get('automaticSchedule').next = Date.now() - 1;
+  await tick(h);
   assert.equal(h.api.status().phase, 'active');
-  assert.ok(h.settings.get('automaticSchedule').next > Date.now());
+  assert.deepEqual([...h.api.status().entries.map(e => e.token)].sort(), [h.tokens[1].uuid, h.tokens[2].uuid].sort());
+  assert.equal(h.players[0].character.id, 'a0');
+  assert.equal(h.players[1].character.id, 'a2');
+  await h.api.revert();
+});
+
+test('automatic swaps skip duplicate linked bodies and empty scenes without opening a dialog', async () => {
+  const h = await harness();
+  h.settings.set('automaticSwaps', true);
+  await tick(h);
+  h.game.scenes.active = { tokens: new Set() };
+  h.settings.get('automaticSchedule').next = Date.now() - 1;
+  await tick(h);
+  assert.equal(h.api.status().phase, undefined);
+  assert.equal(h.getDialog(), undefined);
+  h.game.scenes.active = { tokens: new Set([...h.tokens, { ...h.tokens[0], uuid: 'Scene.s.Token.duplicate' }]) };
+  h.settings.get('automaticSchedule').next = Date.now() - 1;
+  await tick(h);
+  assert.equal(h.api.status().entries.length, 3);
+  await h.api.revert();
 });
 
 test('persistent chat timer sits outside messages and survives clearing, rerendering and reversion', async () => {
@@ -632,9 +655,13 @@ test('persistent chat timer sits outside messages and survives clearing, rerende
   h.hooks.get('renderChatLog')({}, [root]);
   assert.equal(panels.length, 1);
   assert.match(panels[0].textContent, /remaining/);
+  h.settings.set('automaticSwaps', false);
+  h.hooks.get('renderChatLog')({}, [root]);
+  assert.match(panels[0].textContent, /remaining/);
+  assert.doesNotMatch(panels[0].textContent, /Automatic swap/);
   h.game.user = h.gm;
   await h.api.revert();
   h.hooks.get('renderChatLog')({}, [root]);
   assert.match(panels[0].textContent, /no active swap/);
-  assert.match(panels[0].textContent, /Automatic swap/);
+  assert.doesNotMatch(panels[0].textContent, /Automatic swap/);
 });

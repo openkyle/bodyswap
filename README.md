@@ -1,4 +1,4 @@
-# Body Swap — preview 0.3.7
+# Body Swap — preview 0.3.8
 
 Target: Foundry VTT **11 build 315**, D&D 5e **2.4.1**. This preview has automated logic tests, but has not yet been tested inside a running Foundry world.
 
@@ -40,9 +40,9 @@ The optional timer measures real-world seconds from the completed swap. Zero dis
 
 A persistent timer panel sits at the bottom of chat, above the input controls and outside the message log. It remains after chat messages are cleared and shows the current swap countdown, manual-reversion status, or waiting-for-rolls status. When idle it stays visible with “no active swap.” It also shows the next automatic-swap countdown when enabled.
 
-Enable **Automatic swaps** in module settings and set **Automatic swaps every X minutes (real time)**. The feature is off by default; the recommended/default interval is **30 minutes**, with a minimum of 1 minute. Run a manual swap to save its participants. Automatic swaps reuse those tokens (excluding bodies left unchanged in the assignment editor), even if the GM changes token selection or scenes. They randomize a new plan; manual pairings are not retained. Each active swap is restored before the next random swap begins. Constitution resistance and other module options still apply.
+Enable **Automatic swaps** in module settings and set **Automatic swaps every X minutes (real time)**. The feature is off by default; the recommended/default interval is **30 minutes**, with a minimum of 1 minute. Enabling the setting starts the countdown immediately; no manual swap is required. Each automatic swap uses all eligible tokens on the currently active world scene, regardless of the GM’s selection or viewed scene. Enable **Include enemies** to include unassigned NPC bodies. Duplicate linked bodies and repeated starting bodies for the same player are skipped. Each run uses a new random plan; manual exclusions and pairings are not retained. Each active swap is restored before the next random swap begins. Constitution resistance and other module options still apply.
 
-The schedule uses real-world time, independently of the reversion duration, and survives reloads. An active primary GM checks it every five seconds. Pending rolls or recovery delay the next swap; missed intervals produce one swap, not a backlog. Changing the interval or starting a new manual swap resets the countdown. Turning automatic swaps off stops future swaps without ending the current one; manual Revert Now alone does not stop the schedule. Missing saved tokens require a new manual swap to choose participants.
+The schedule uses real-world time, independently of the reversion duration, and survives reloads. An active primary GM checks it every five seconds. Pending rolls or recovery delay the next swap; missed intervals produce one swap, not a backlog. Changing the interval or starting a new manual swap resets the countdown. Turning automatic swaps off stops future swaps without ending the current one; manual Revert Now alone does not stop the schedule. Scenes with fewer than two eligible bodies are skipped without opening an assignment dialog. The persistent current-swap timer works independently with automatic swaps disabled.
 
 ## Permissions and shared accounts
 
