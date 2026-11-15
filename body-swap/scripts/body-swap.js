@@ -33,6 +33,7 @@ Hooks.once('init', () => {
   const register = (key, name, type, defaultValue, hint, extra = {}) => game.settings.register(ID, key, {
     name, hint, scope: 'world', config: true, type, default: defaultValue, ...extra
   });
+  register('sharedVision', 'Shared vision', Boolean, false, 'Preserve existing player permissions and give every non-GM account (including offline players) Owner access to bodies occupied by swapped players. This also permits controlling and editing those bodies. Applies to new swaps; reversion restores original permissions.');
   register('showPlayerNames', 'Show player names', Boolean, false, 'Add account names after character names, e.g. Brother (Josh), in assignments, swap chat, and temporary token/initiative names. Off by default. Applies to new swaps; existing swaps keep their names until reverted.');
   register('includeEnemies', 'Include enemies and unassigned bodies', Boolean, false, 'Off: only bodies assigned to a non-GM player are eligible. On: selected NPCs can participate; their minds remain GM-controlled.');
   register('compendiumLookup', 'Search Actor compendiums', Boolean, false, 'If a token has no usable Actor, search the Actors sidebar by exact name, then Actor compendiums. Ambiguous matches stop the swap.');
@@ -167,7 +168,7 @@ async function start(chosenTokens, chosenPlan) {
   if (state().phase) throw new Error('A swap or roll request already exists. Revert or cancel it first.');
   const tokens = chosenTokens ?? canvas.tokens.controlled.map(t => t.document);
   if (tokens.length < 2) return openAssignments();
-  const session = { id: foundry.utils.randomID(), phase: 'preparing', entries: [], actors: [], users: [], bindings: [], imported: [], rolls: {}, dc: setting('dc'), rollType: setting('rollType'), duration: Math.max(0, Number(setting('duration')) || 0) };
+  const session = { id: foundry.utils.randomID(), phase: 'preparing', entries: [], actors: [], users: [], bindings: [], imported: [], rolls: {}, sharedVision: setting('sharedVision'), dc: setting('dc'), rollType: setting('rollType'), duration: Math.max(0, Number(setting('duration')) || 0) };
   await save(session);
   try {
     const seenActors = new Set();
@@ -238,14 +239,17 @@ async function applySwap(session) {
     return;
   }
   const participatingUsers = mappings.flatMap(m => m.source.users);
+  const sharedOwners = session.sharedVision ? game.users.filter(user => !user.isGM).map(user => user.id) : [];
+  const removedUsers = session.sharedVision ? [] : participatingUsers;
   // Shared sidebar Actors must grant access to every incoming player. Apply
   // those first, then the individual synthetic Actors for scene-token access.
   const baseOwners = new Map();
   const tokenOwners = new Map();
   for (const { source, target } of mappings) {
     if (!baseOwners.has(target.base)) baseOwners.set(target.base, new Set());
-    for (const id of source.users) baseOwners.get(target.base).add(id);
-    if (target.actor !== target.base) tokenOwners.set(target.actor, source.users);
+    const incomingOwners = session.sharedVision && source.users.length ? sharedOwners : source.users;
+    for (const id of incomingOwners) baseOwners.get(target.base).add(id);
+    if (target.actor !== target.base) tokenOwners.set(target.actor, incomingOwners);
     for (const id of source.users) session.users.push({ id, character: game.users.get(id).character?.id ?? null });
   }
   const updates = new Map();
@@ -253,7 +257,7 @@ async function applySwap(session) {
     const actor = await fromUuid(uuid);
     if (!actor) throw new Error(`Missing Actor: ${uuid}`);
     session.actors.push({ uuid, ownership: copy(actor.ownership) });
-    updates.set(uuid, transferredOwnership(actor.ownership, participatingUsers, [...owners]));
+    updates.set(uuid, transferredOwnership(actor.ownership, removedUsers, [...owners]));
   }
   // Journal cosmetic changes before any writes, alongside permission recovery.
   session.names = [];

@@ -409,3 +409,55 @@ test('optional player labels append accounts while default labels use character 
   await h.api.revert();
   assert.deepEqual(h.tokens.map(t => t.name), originalNames);
 });
+
+
+test('shared vision grants all players swapped-body ownership and preserves original party access', async () => {
+  for (const unlinked of [false, true]) {
+    const h = await harness({ enemy: true });
+    assert.equal(h.settings.get('sharedVision'), false);
+    h.settings.set('sharedVision', true);
+    h.settings.set('includeEnemies', true);
+    h.players[1].active = false;
+    h.actors[0].ownership = { default: 0, u0: 3, u1: 3, u2: 2 };
+    h.actors[2].ownership = { default: 0, observer: 2 };
+    let enemyActor = h.actors[2];
+    if (unlinked) {
+      enemyActor = { ...enemyActor, uuid: 'Scene.s.Token.t2.Actor.a2', ownership: { default: 0, observer: 1 } };
+      h.documents.set(enemyActor.uuid, enemyActor);
+      h.tokens[2].actor = enemyActor;
+      h.tokens[2].actorLink = false;
+    }
+    const observed = [...h.actors, ...(unlinked ? [enemyActor] : [])];
+    const originals = structuredClone(observed.map(a => a.ownership));
+    h.canvas.tokens.controlled = [h.tokens[0], h.tokens[2]].map(document => ({ document }));
+    await h.api.start();
+    assert.equal(h.players[0].character.id, 'a2');
+    assert.equal(h.players[1].character.id, 'a1');
+    assert.equal(h.players[2].character, null);
+    // Neither the old player body nor the unrelated party member loses access.
+    assert.deepEqual(h.actors[0].ownership, originals[0]);
+    assert.deepEqual(h.actors[1].ownership, originals[1]);
+    for (const actor of [h.actors[2], enemyActor]) {
+      for (const player of h.players) assert.equal(actor.ownership[player.id], 3);
+      assert.equal(actor.ownership.gm, undefined);
+    }
+    assert.equal(enemyActor.ownership.observer, unlinked ? 1 : 2);
+    h.settings.set('sharedVision', false);
+    await h.api.revert();
+    assert.deepEqual(observed.map(a => a.ownership), originals);
+    assert.equal(h.players[0].character.id, 'a0');
+  }
+});
+
+test('shared-vision permission grants roll back after a failed swap', async () => {
+  const h = await harness({ enemy: true });
+  h.settings.set('sharedVision', true);
+  h.settings.set('includeEnemies', true);
+  const originals = structuredClone(h.actors.map(a => a.ownership));
+  h.tokens[1].update = async () => { throw new Error('simulated shared-vision swap failure'); };
+  await assert.rejects(h.api.start());
+  assert.deepEqual(h.actors.map(a => a.ownership), originals);
+  h.tokens[1].update = updateDocument;
+  await h.api.revert();
+  assert.equal(h.api.status().phase, undefined);
+});

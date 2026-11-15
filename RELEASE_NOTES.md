@@ -1,7 +1,9 @@
-Body Swap 0.3.4 preview for Foundry VTT 11 build 315 and D&D 5e 2.4.1.
+Body Swap 0.3.5 preview for Foundry VTT 11 build 315 and D&D 5e 2.4.1.
 
-Swapped bodies now use the incoming character’s original scene-token name instead of the player account name. If Josh controls Brother, Brother’s destination is named Brother on the board, in initiative, and in the prototype token. Chat and the assignment window also show character names by default. The optional Show player names setting appends account names, such as Brother (Josh), for new swaps; it is off by default.
+Adds Shared vision, off by default. When enabled, every non-GM account receives Owner access to bodies occupied by swapped players, including enemy bodies. Offline players and players outside the swap are included. Existing permissions on original player bodies and other party characters are preserved rather than removed.
 
-Names remain temporary and revert when the swap ends. Existing name-display settings remain untouched. Enemy names have no GM prefix, and chat portraits remain included.
+Owner access includes control and editing as well as shared vision. Token sight settings are unchanged. The option is saved with new swap requests; reversion restores original ownership exactly, even if the setting changes during the swap.
 
-All 19 automated tests pass, including the Josh/Brother case and exact name restoration. Live Foundry testing is pending.
+Character names remain the default, optional player labels remain available, and names still revert without overriding name-display settings.
+
+All 21 automated tests pass, including linked and unlinked destinations, offline and nonparticipating players, exact restoration, and failure recovery. Live Foundry testing is pending.

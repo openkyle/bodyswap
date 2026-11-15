@@ -1,4 +1,4 @@
-# Body Swap — preview 0.3.4
+# Body Swap — preview 0.3.5
 
 Target: Foundry VTT **11 build 315**, D&D 5e **2.4.1**. This preview has automated logic tests, but has not yet been tested inside a running Foundry world.
 
@@ -34,7 +34,9 @@ The optional timer measures real-world seconds from the completed swap. Zero dis
 
 The full original ownership map is saved for every affected Actor, including default access, multiple owners, observers, and offline users. Original player character assignments are saved separately. Reversion restores these exact values, including shared vision permissions. HP, items, effects, and positions are not rolled back.
 
-During a swap, participating accounts lose access to other participating bodies and receive ownership of their destination. Unrelated accounts retain their existing access. Permissions edited manually during the swap are replaced by the saved original permissions on reversion.
+By default, participating accounts lose access to other participating bodies and receive ownership of their destination. Unrelated accounts retain their existing access.
+
+Enable **Shared vision** in module settings to preserve all existing permissions and give every non-GM account Owner access to any body occupied by a swapped player, including enemy bodies. This includes offline players and players outside the swap. Existing access to original player bodies remains intact even when an enemy mind enters one. Owner access also permits controlling and editing these bodies. The option is off by default and is saved with each new swap request; reversion restores the exact original permissions. Token vision and sight settings are unchanged. Permissions edited manually during the swap are replaced by the saved original permissions on reversion.
 
 Eligibility is based on each player's **assigned character**, not every character they can access. This prevents shared party ownership from accidentally treating every player as every character's controller. Foundry assigns only one character per account: a partner's additional character sharing the same login is not automatically recognized as a separate player-controlled participant in this preview. Multiple accounts assigned to the same body travel together. With Include enemies enabled, unassigned bodies participate as GM-controlled minds.
 
