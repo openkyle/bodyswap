@@ -50,7 +50,6 @@ async function harness({ resistance = false, enemy = false } = {}) {
   const module = {};
   const context = vm.createContext({
     cycle, transferredOwnership, esc: escapeHTML, reassign, restrictPlan, console, Set, Map, Date,
-    CONST: { TOKEN_DISPLAY_MODES: { ALWAYS: 50 } },
     foundry: { utils: { deepClone: clone, randomID: () => 'session-1' } },
     game: { settings: { register: (_, key, opts) => settings.set(key, clone(opts.default)), get: (_, key) => settings.get(key), set: async (_, key, value) => { settings.set(key, clone(value)); } }, users, user: gm, actors, combats: { contents: [] }, packs: [], system: { id: 'dnd5e' }, modules: { get: () => module }, messages: { contents: messages } },
     canvas,
@@ -284,6 +283,11 @@ test('unlinked bodies share sidebar access without losing individual control or 
   assert.equal(enemies[0].name, 'Player 0');
   assert.equal(enemies[1].name, 'Player 1');
   assert.equal(base.prototypeToken.name, 'Player 0 / Player 1');
+  assert.equal(h.tokens[0].name, 'Goblin 0');
+  assert.equal(h.tokens[1].name, 'Goblin 1');
+  assert.equal(h.actors[0].prototypeToken.name, 'Goblin 0');
+  assert.doesNotMatch(h.messages.at(-1).content, /GM \(/);
+  assert.deepEqual(enemies.map(t => t.displayName), [0, 0]);
   assert.equal(base.ownership.u0, 3);
   assert.equal(base.ownership.u1, 3);
   assert.equal(synthetic[0].ownership.u0, 3);
@@ -317,9 +321,10 @@ test('multiple linked tokens for one body remain rejected', async () => {
 });
 
 
-test('chat portraits and player names follow bodies; all names and display settings revert', async () => {
+test('chat portraits and temporary names follow bodies without overriding name visibility', async () => {
   const h = await harness();
   h.players[0].name = 'Alice <&>';
+  h.tokens.forEach((token, i) => { token.displayName = [0, 20, 50][i]; });
   h.tokens[1].texture.src = 'tokens/animated.webm';
   h.tokens[2].texture.src = '';
   h.actors[2].img = '';
@@ -342,17 +347,20 @@ test('chat portraits and player names follow bodies; all names and display setti
   for (let i = 0; i < h.tokens.length; i++) {
     const incoming = h.players.find(p => p.character.id === h.tokens[i].actorId);
     assert.equal(h.tokens[i].name, incoming.name);
-    assert.equal(h.tokens[i].displayName, 50);
+    assert.equal(h.tokens[i].displayName, [0, 20, 50][i]);
     assert.equal(h.actors[i].prototypeToken.name, incoming.name);
     assert.equal(existing[i].name, incoming.name);
   }
   const added = { uuid: 'Combat.later.Combatant.new', token: h.tokens[0], name: h.tokens[0].name, update: updateDocument };
   h.game.combats.contents.push({ combatants: [added] });
   h.documents.set(added.uuid, added);
+  // Visibility edits made during a swap must also survive reversion.
+  h.tokens[1].displayName = 30;
+  assert.ok(h.api.status().names.every(r => !('displayName' in r.original) && !('displayName' in r.applied)));
   // Revert reads the persisted journal, as it does following a reload.
   await h.api.revert();
   assert.deepEqual(h.tokens.map(t => t.name), names);
-  assert.deepEqual(h.tokens.map(t => t.displayName), [20, 20, 20]);
+  assert.deepEqual(h.tokens.map(t => t.displayName), [0, 30, 50]);
   assert.deepEqual(h.actors.map(a => a.prototypeToken.name), prototypes);
   assert.deepEqual(existing.map(c => c.name), ['Initiative alias 0', 'Initiative alias 1', 'Initiative alias 2']);
   assert.deepEqual(existing.map(c => c.initiative), [20, 19, 18]);

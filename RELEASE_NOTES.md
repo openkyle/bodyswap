@@ -1,9 +1,7 @@
-Body Swap 0.3.2 preview for Foundry VTT 11 build 315 and D&D 5e 2.4.1.
+Body Swap 0.3.3 preview for Foundry VTT 11 build 315 and D&D 5e 2.4.1.
 
-Swap chat cards now show original and destination token portraits. Constitution request cards show body portraits too, with Actor-image or placeholder fallbacks for missing art and video textures.
+Temporary names now preserve existing token name-display settings. The module no longer forces nameplates to stay visible, and display-setting edits during a swap are left untouched on reversion.
 
-Destination scene tokens and existing initiative entries are renamed for their incoming players. Nameplates are visible on the board during the swap. Prototype token names also change; shared sidebar Actors list the incoming names together while each scene token keeps its individual incoming name.
+GM-controlled minds use their original body names without a GM prefix. For example, a player body receiving a Goblin mind is temporarily named Goblin. Player-controlled minds still use their player names. Scene tokens, prototype names, and initiative names revert when the swap ends.
 
-Reversion restores original names, nameplate visibility, prototype names, and existing initiative aliases. Initiative entries added during the swap have inherited temporary names restored. Recovery data is saved before any name or permission changes.
-
-All 18 automated tests pass. Live Foundry testing is pending.
+Chat portraits remain included. All 18 automated tests pass. Live Foundry testing is pending.

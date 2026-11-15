@@ -23,7 +23,7 @@ function tokenPortrait(token) {
   const src = token.texture?.src;
   return (src && !/\.(webm|mp4)(?:[?#]|$)/i.test(src) ? src : token.actor?.img) || 'icons/svg/mystery-man.svg';
 }
-const mindName = entry => entry.users.length ? entry.users.map(id => game.users.get(id).name).join(', ') : `GM (${entry.name})`;
+const mindName = entry => entry.users.length ? entry.users.map(id => game.users.get(id).name).join(', ') : entry.name;
 const chatPortrait = entry => `<img src="${esc(entry.portrait || 'icons/svg/mystery-man.svg')}" alt="${esc(entry.name)}" title="${esc(entry.name)}" style="width:40px;height:40px;object-fit:contain;border:0;flex-shrink:0">`;
 const combatants = () => (game.combats?.contents ?? []).flatMap(combat => [...combat.combatants]);
 
@@ -259,8 +259,8 @@ async function applySwap(session) {
     const token = await fromUuid(target.token);
     const name = mindName(source);
     session.names.push({ kind: 'token', uuid: token.uuid,
-      original: { name: token.name, displayName: token.displayName },
-      applied: { name, displayName: CONST.TOKEN_DISPLAY_MODES.ALWAYS } });
+      original: { name: token.name },
+      applied: { name } });
     for (const combatant of combatants().filter(c => c.token?.uuid === token.uuid)) {
       session.names.push({ kind: 'combatant', uuid: combatant.uuid, original: { name: combatant.name }, applied: { name } });
     }
