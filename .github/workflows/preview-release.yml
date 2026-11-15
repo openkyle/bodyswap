@@ -1,0 +1,34 @@
+name: Test and publish preview
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: body-swap-preview
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm test
+      - name: Package module
+        run: |
+          mkdir -p dist
+          zip -qr dist/body-swap.zip body-swap
+          cp body-swap/module.json dist/module.json
+      - name: Publish versioned preview
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./body-swap/module.json').version")
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "Release v$VERSION already exists; bump the module version to publish changes."
+          else
+            gh release create "v$VERSION" dist/body-swap.zip dist/module.json --target "$GITHUB_SHA" --prerelease --title "Body Swap $VERSION preview" --notes-file RELEASE_NOTES.md
+          fi
