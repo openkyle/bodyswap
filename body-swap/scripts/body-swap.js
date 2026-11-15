@@ -23,7 +23,9 @@ function tokenPortrait(token) {
   const src = token.texture?.src;
   return (src && !/\.(webm|mp4)(?:[?#]|$)/i.test(src) ? src : token.actor?.img) || 'icons/svg/mystery-man.svg';
 }
-const mindName = entry => entry.users.length ? entry.users.map(id => game.users.get(id).name).join(', ') : entry.name;
+const mindName = entry => setting('showPlayerNames') && entry.users.length
+  ? `${entry.name} (${entry.users.map(id => game.users.get(id).name).join(', ')})`
+  : entry.name;
 const chatPortrait = entry => `<img src="${esc(entry.portrait || 'icons/svg/mystery-man.svg')}" alt="${esc(entry.name)}" title="${esc(entry.name)}" style="width:40px;height:40px;object-fit:contain;border:0;flex-shrink:0">`;
 const combatants = () => (game.combats?.contents ?? []).flatMap(combat => [...combat.combatants]);
 
@@ -31,6 +33,7 @@ Hooks.once('init', () => {
   const register = (key, name, type, defaultValue, hint, extra = {}) => game.settings.register(ID, key, {
     name, hint, scope: 'world', config: true, type, default: defaultValue, ...extra
   });
+  register('showPlayerNames', 'Show player names', Boolean, false, 'Add account names after character names, e.g. Brother (Josh), in assignments, swap chat, and temporary token/initiative names. Off by default. Applies to new swaps; existing swaps keep their names until reverted.');
   register('includeEnemies', 'Include enemies and unassigned bodies', Boolean, false, 'Off: only bodies assigned to a non-GM player are eligible. On: selected NPCs can participate; their minds remain GM-controlled.');
   register('compendiumLookup', 'Search Actor compendiums', Boolean, false, 'If a token has no usable Actor, search the Actors sidebar by exact name, then Actor compendiums. Ambiguous matches stop the swap.');
   register('resistance', 'Request Constitution rolls', Boolean, false, 'Successful bodies are excluded. All eligible bodies must roll before the swap occurs. The GM can roll for offline players or NPCs.');
@@ -72,7 +75,7 @@ function openAssignments() {
     const body = token.actor?.uuid;
     if (body && seen.has(body)) reason = 'Another linked token uses this same body';
     if (!reason && body) seen.add(body);
-    return { token, actorId: token.actorId, reason, label: `${token.name}${users.length ? ` (${users.map(u => u.name).join(', ')})` : ' (GM)'}` };
+    return { token, actorId: token.actorId, reason, label: mindName({ name: token.name, users: users.map(u => u.id) }) };
   });
   const eligible = rows.filter(row => !row.reason);
   if (eligible.length < 2) throw new Error('This scene needs at least two eligible bodies. Enable Include enemies to include unassigned bodies.');

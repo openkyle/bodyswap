@@ -280,9 +280,9 @@ test('unlinked bodies share sidebar access without losing individual control or 
   dialog.buttons.apply.callback();
   await new Promise(resolve => setTimeout(resolve, 20));
   assert.equal(h.api.status().phase, 'active');
-  assert.equal(enemies[0].name, 'Player 0');
-  assert.equal(enemies[1].name, 'Player 1');
-  assert.equal(base.prototypeToken.name, 'Player 0 / Player 1');
+  assert.equal(enemies[0].name, 'Body 0');
+  assert.equal(enemies[1].name, 'Body 1');
+  assert.equal(base.prototypeToken.name, 'Body 0 / Body 1');
   assert.equal(h.tokens[0].name, 'Goblin 0');
   assert.equal(h.tokens[1].name, 'Goblin 1');
   assert.equal(h.actors[0].prototypeToken.name, 'Goblin 0');
@@ -323,7 +323,12 @@ test('multiple linked tokens for one body remain rejected', async () => {
 
 test('chat portraits and temporary names follow bodies without overriding name visibility', async () => {
   const h = await harness();
-  h.players[0].name = 'Alice <&>';
+  h.players[0].name = 'Josh';
+  h.tokens[0].name = 'Brother <&>';
+  h.actors[0].name = 'Brother <&>';
+  await h.api.configure();
+  assert.ok(h.getDialog().content.includes('Brother &lt;&amp;&gt;'));
+  assert.doesNotMatch(h.getDialog().content, /Josh|Player 1|Player 2/);
   h.tokens.forEach((token, i) => { token.displayName = [0, 20, 50][i]; });
   h.tokens[1].texture.src = 'tokens/animated.webm';
   h.tokens[2].texture.src = '';
@@ -342,14 +347,16 @@ test('chat portraits and temporary names follow bodies without overriding name v
   assert.ok(card.includes('tokens/t0.png'));
   assert.ok(card.includes('portraits/a1.png'));
   assert.ok(card.includes('icons/svg/mystery-man.svg'));
-  assert.ok(card.includes('Alice &lt;&amp;&gt;'));
+  assert.ok(card.includes('Brother &lt;&amp;&gt;'));
+  assert.doesNotMatch(card, /Josh|Player 1|Player 2/);
   assert.ok(!card.includes('animated.webm'));
   for (let i = 0; i < h.tokens.length; i++) {
     const incoming = h.players.find(p => p.character.id === h.tokens[i].actorId);
-    assert.equal(h.tokens[i].name, incoming.name);
+    const incomingName = names[h.players.indexOf(incoming)];
+    assert.equal(h.tokens[i].name, incomingName);
     assert.equal(h.tokens[i].displayName, [0, 20, 50][i]);
-    assert.equal(h.actors[i].prototypeToken.name, incoming.name);
-    assert.equal(existing[i].name, incoming.name);
+    assert.equal(h.actors[i].prototypeToken.name, incomingName);
+    assert.equal(existing[i].name, incomingName);
   }
   const added = { uuid: 'Combat.later.Combatant.new', token: h.tokens[0], name: h.tokens[0].name, update: updateDocument };
   h.game.combats.contents.push({ combatants: [added] });
@@ -378,4 +385,27 @@ test('failed renaming retains recovery and restores original names on retry', as
   assert.deepEqual(h.tokens.map(t => t.name), names);
   assert.deepEqual(h.actors.map(a => a.prototypeToken.name), ['Prototype 0', 'Prototype 1', 'Prototype 2']);
   assert.equal(h.api.status().phase, undefined);
+});
+
+
+test('optional player labels append accounts while default labels use character names', async () => {
+  const h = await harness({ enemy: true });
+  assert.equal(h.settings.get('showPlayerNames'), false);
+  h.settings.set('showPlayerNames', true);
+  h.settings.set('includeEnemies', true);
+  h.players[0].name = 'Josh';
+  h.tokens[0].name = 'Brother';
+  await h.api.configure();
+  assert.ok(h.getDialog().content.includes('Brother (Josh)'));
+  const originalNames = h.tokens.map(t => t.name);
+  await h.api.start();
+  const brothersBody = h.tokens.find(t => t.actorId === h.players[0].character.id);
+  assert.equal(brothersBody.name, 'Brother (Josh)');
+  assert.equal(brothersBody.actor.prototypeToken.name, 'Brother (Josh)');
+  assert.ok(h.messages.at(-1).content.includes('Brother (Josh)'));
+  assert.ok(h.tokens.some(t => t.name === 'Body 2'));
+  assert.doesNotMatch(h.messages.at(-1).content, /GM \(/);
+  h.settings.set('showPlayerNames', false);
+  await h.api.revert();
+  assert.deepEqual(h.tokens.map(t => t.name), originalNames);
 });

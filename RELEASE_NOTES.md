@@ -1,7 +1,7 @@
-Body Swap 0.3.3 preview for Foundry VTT 11 build 315 and D&D 5e 2.4.1.
+Body Swap 0.3.4 preview for Foundry VTT 11 build 315 and D&D 5e 2.4.1.
 
-Temporary names now preserve existing token name-display settings. The module no longer forces nameplates to stay visible, and display-setting edits during a swap are left untouched on reversion.
+Swapped bodies now use the incoming character’s original scene-token name instead of the player account name. If Josh controls Brother, Brother’s destination is named Brother on the board, in initiative, and in the prototype token. Chat and the assignment window also show character names by default. The optional Show player names setting appends account names, such as Brother (Josh), for new swaps; it is off by default.
 
-GM-controlled minds use their original body names without a GM prefix. For example, a player body receiving a Goblin mind is temporarily named Goblin. Player-controlled minds still use their player names. Scene tokens, prototype names, and initiative names revert when the swap ends.
+Names remain temporary and revert when the swap ends. Existing name-display settings remain untouched. Enemy names have no GM prefix, and chat portraits remain included.
 
-Chat portraits remain included. All 18 automated tests pass. Live Foundry testing is pending.
+All 19 automated tests pass, including the Josh/Brother case and exact name restoration. Live Foundry testing is pending.
