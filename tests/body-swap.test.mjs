@@ -57,7 +57,7 @@ async function harness({ resistance = false, enemy = false } = {}) {
     setTimeout,
     Hooks: { once: (name, fn) => hooks.set(name, fn), on: (name, fn) => hooks.set(name, fn) },
     ui: { notifications: { error() {}, info() {}, warn() {} } },
-    ChatMessage: { create: async data => { messages.push(data); return data; } },
+    ChatMessage: { getSpeaker: ({ actor }) => ({ actor: actor.id }), create: async data => { messages.push(data); return data; } },
     fromUuid: async uuid => documents.get(uuid),
     setInterval: (fn, duration) => { if (duration === 5000) interval = fn; }
   });
@@ -343,7 +343,7 @@ test('chat portraits and temporary names follow bodies without overriding name v
   const prototypes = h.actors.map(a => a.prototypeToken.name);
   await h.api.start();
   const card = h.messages.at(-1).content;
-  assert.equal((card.match(/<img /g) ?? []).length, 6);
+  assert.equal((card.match(/<img /g) ?? []).length, 3);
   assert.ok(card.includes('tokens/t0.png'));
   assert.ok(card.includes('portraits/a1.png'));
   assert.ok(card.includes('icons/svg/mystery-man.svg'));
@@ -460,4 +460,77 @@ test('shared-vision permission grants roll back after a failed swap', async () =
   h.tokens[1].update = updateDocument;
   await h.api.revert();
   assert.equal(h.api.status().phase, undefined);
+});
+
+
+test('players submit their own Constitution rolls and the GM accepts private results', async () => {
+  for (const rollType of ['check', 'save']) {
+    const h = await harness({ resistance: true });
+    h.settings.set('rollType', rollType);
+    await h.api.start();
+    const request = h.messages[0];
+    assert.ok(request.content.includes('</span></div><button'));
+    const message = { getFlag: (_, key) => request.flags['body-swap'][key] };
+    const buttons = h.tokens.map(token => ({ dataset: { bodySwapRoll: token.uuid }, addEventListener(_, fn) { this.click = fn; } }));
+    const html = { find() { return { each(fn) { buttons.forEach((b, i) => fn(i, b)); } }; } };
+    let calls = 0;
+    const results = [];
+    for (const actor of h.actors) {
+      actor.isOwner = true;
+      actor[rollType === 'save' ? 'rollAbilitySave' : 'rollAbilityTest'] = async (ability, options) => {
+        calls++;
+        assert.equal(ability, 'con');
+        assert.equal(options.chatMessage, false);
+        return { options: { rollMode: 'selfroll' }, async toMessage(data, options) {
+          assert.equal(options.rollMode, 'gmroll');
+          results.push({ user: h.game.user, rolls: [{ total: 1 }], getFlag: (_, key) => data.flags['body-swap'][key] });
+        } };
+      };
+    }
+    for (let i = 0; i < 3; i++) {
+      h.game.user = h.players[i];
+      h.hooks.get('renderChatMessage')(message, html);
+      assert.equal(buttons[i].disabled, false);
+      const other = buttons[(i + 1) % 3];
+      assert.equal(other.disabled, true);
+      await other.click();
+      assert.equal(calls, i);
+      await buttons[i].click();
+      assert.equal(buttons[i].disabled, true);
+      await buttons[i].click();
+      assert.equal(calls, i + 1);
+      assert.equal(h.api.status().phase, 'rolling');
+    }
+    h.game.user = h.gm;
+    for (const result of results) h.hooks.get('createChatMessage')(result);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(h.api.status().phase, 'active');
+    h.hooks.get('renderChatMessage')(message, html);
+    assert.ok(buttons.every(b => b.disabled && b.textContent === 'Roll received'));
+    await h.api.revert();
+  }
+});
+
+test('cancelled player roll can retry and the GM can roll for an NPC', async () => {
+  const h = await harness({ resistance: true, enemy: true });
+  h.settings.set('includeEnemies', true);
+  await h.api.start();
+  const request = h.messages[0];
+  const message = { getFlag: (_, key) => request.flags['body-swap'][key] };
+  const button = { dataset: { bodySwapRoll: h.tokens[2].uuid }, addEventListener(_, fn) { this.click = fn; } };
+  const html = { find() { return { each(fn) { fn(0, button); } }; } };
+  h.game.user = h.players[0];
+  h.hooks.get('renderChatMessage')(message, html);
+  assert.equal(button.disabled, true);
+  h.game.user = h.gm;
+  h.actors[2].isOwner = true;
+  h.actors[2].rollAbilityTest = async () => null;
+  h.hooks.get('renderChatMessage')(message, html);
+  assert.equal(button.disabled, false);
+  await button.click();
+  assert.equal(button.disabled, false);
+  assert.equal(h.api.status().rolls[h.tokens[2].uuid], undefined);
+  await h.api.cancel();
+  await button.click();
+  assert.equal(button.disabled, true);
 });

@@ -207,7 +207,7 @@ async function start(chosenTokens, chosenPlan) {
     session.phase = setting('resistance') ? 'rolling' : 'ready';
     await save(session);
     if (session.phase === 'rolling') {
-      const buttons = session.entries.map(e => `<div style="display:flex;align-items:center;gap:8px;margin:8px 0">${chatPortrait(e)}<span>${esc(e.name)}</span> <button type="button" data-body-swap-roll="${esc(e.token)}">Roll Constitution</button></div>`).join('');
+      const buttons = session.entries.map(e => `<div style="margin:12px 0"><div style="display:flex;align-items:center;gap:8px">${chatPortrait(e)}<span style="min-width:0;overflow-wrap:break-word">${esc(e.name)}</span></div><button style="display:block;width:100%;margin-top:6px" type="button" data-body-swap-roll="${esc(e.token)}">Roll Constitution</button></div>`).join('');
       await chat(`<h3>Bodies are swapping!</h3><p>Roll a Constitution ${session.rollType === 'save' ? 'saving throw' : 'check'} against DC ${session.dc}. Success keeps you in your body.</p>${buttons}`, { request: session.id });
     } else await applySwap(session);
   } catch (error) {
@@ -292,7 +292,7 @@ async function applySwap(session) {
     session.phase = 'active';
     session.expires = session.duration ? Date.now() + session.duration * 1000 : null;
     await save(session);
-    const rows = mappings.map(({ source, target }) => `<div style="display:flex;align-items:center;gap:8px;margin:8px 0">${chatPortrait(source)}<span>${esc(mindName(source))}</span><span aria-label="becomes">→</span>${chatPortrait(target)}<span>${esc(target.name)}</span></div>`).join('');
+    const rows = mappings.map(({ source, target }) => `<div style="display:flex;align-items:center;gap:8px;margin:8px 0"><span style="min-width:0;overflow-wrap:break-word">${esc(mindName(source))}</span><span aria-label="becomes">→</span>${chatPortrait(target)}<span style="min-width:0;overflow-wrap:break-word">${esc(target.name)}</span></div>`).join('');
     await chat(`<h3>Body Swap</h3>${rows}<p><span data-body-swap-active="${esc(session.id)}">${session.expires ? 'Timer running' : 'Active — manual reversion'}</span></p><button type="button" data-body-swap-active="${esc(session.id)}" hidden>Revert now</button>`, { active: session.id });
   } catch (error) {
     await revert();
@@ -352,6 +352,19 @@ async function cancel() {
 }
 
 const rolling = new Set();
+const submitted = new Set();
+function updateRollControl(button) {
+  const session = state();
+  const request = button.dataset.bodySwapRequest;
+  const entry = session.entries?.find(e => e.token === button.dataset.bodySwapRoll);
+  const key = `${request}:${button.dataset.bodySwapRoll}`;
+  const done = entry && session.rolls[entry.token] !== undefined;
+  const allowed = entry && (game.user.isGM || entry.users.includes(game.user.id));
+  button.disabled = session.id !== request || session.phase !== 'rolling' || !allowed || done || rolling.has(key) || submitted.has(key);
+  button.textContent = done ? 'Roll received' : submitted.has(key) ? 'Roll submitted' : rolling.has(key) ? 'Rolling…' : 'Roll Constitution';
+  button.title = allowed ? '' : 'This character’s player or the GM can roll.';
+}
+
 function updateActiveControl(element) {
   const session = state();
   const current = session.id === element.dataset.bodySwapActive;
@@ -380,22 +393,29 @@ Hooks.on('renderChatMessage', (message, html) => {
   const request = message.getFlag(ID, 'request');
   if (!request) return;
   html.find('[data-body-swap-roll]').each((_, button) => {
-    const session = state();
-    const entry = session.entries?.find(e => e.token === button.dataset.bodySwapRoll);
-    button.disabled = session.id !== request || session.phase !== 'rolling' || !entry || session.rolls[entry.token] !== undefined || !(game.user.isGM || entry.users.includes(game.user.id));
+    button.dataset.bodySwapRequest = request;
+    updateRollControl(button);
     button.addEventListener('click', async () => {
+      updateRollControl(button);
+      if (button.disabled) return;
       const current = state();
-      if (current.id !== request || current.phase !== 'rolling' || !entry || current.rolls[entry.token] !== undefined || rolling.has(entry.token)) return;
-      rolling.add(entry.token);
-      button.disabled = true;
+      const entry = current.entries.find(e => e.token === button.dataset.bodySwapRoll);
+      const key = `${request}:${entry.token}`;
+      rolling.add(key);
+      updateRollControl(button);
       try {
         const actor = await fromUuid(entry.actor);
         if (!actor?.isOwner) throw new Error('You do not own this body. Ask the GM to roll.');
         const method = current.rollType === 'save' ? 'rollAbilitySave' : 'rollAbilityTest';
         const roll = await actor[method]('con', { chatMessage: false });
-        if (roll) await roll.toMessage({ speaker: ChatMessage.getSpeaker({ actor }), flavor: `Body Swap: Constitution ${current.rollType} (DC ${current.dc})`, flags: { [ID]: { request: current.id, token: entry.token, result: true } } });
+        if (roll) {
+          // Self-only rolls never reach the GM who resolves the request.
+          const mode = roll.options?.rollMode ?? game.settings.get('core', 'rollMode');
+          await roll.toMessage({ speaker: ChatMessage.getSpeaker({ actor }), flavor: `Body Swap: Constitution ${current.rollType} (DC ${current.dc})`, flags: { [ID]: { request: current.id, token: entry.token, result: true } } }, { rollMode: mode === 'selfroll' ? 'gmroll' : mode });
+          submitted.add(key);
+        }
       } catch (error) { ui.notifications.error(error.message); }
-      finally { rolling.delete(entry.token); button.disabled = false; }
+      finally { rolling.delete(key); updateRollControl(button); }
     });
   });
 });
@@ -441,6 +461,7 @@ Hooks.once('ready', () => {
   }, 5000);
   setInterval(() => {
     globalThis.document?.querySelectorAll('[data-body-swap-active]').forEach(updateActiveControl);
+    globalThis.document?.querySelectorAll('[data-body-swap-roll]').forEach(updateRollControl);
   }, 1000);
   if (primary() && ['applying', 'preparing', 'reverting'].includes(state().phase)) ui.notifications.warn('Body Swap has unfinished recovery data. Run Revert Now before starting another swap.');
 });

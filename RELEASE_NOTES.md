@@ -1,9 +1,7 @@
-Body Swap 0.3.5 preview for Foundry VTT 11 build 315 and D&D 5e 2.4.1.
+Body Swap 0.3.6 preview for Foundry VTT 11 build 315 and D&D 5e 2.4.1.
 
-Adds Shared vision, off by default. When enabled, every non-GM account receives Owner access to bodies occupied by swapped players, including enemy bodies. Offline players and players outside the swap are included. Existing permissions on original player bodies and other party characters are preserved rather than removed.
+Constitution request cards place each roll button on its own line below the portrait and body name. Swap cards show the original character name, an arrow, and only the destination portrait and name.
 
-Owner access includes control and editing as well as shared vision. Token sight settings are unchanged. The option is saved with new swap requests; reversion restores original ownership exactly, even if the setting changes during the swap.
+Assigned players can roll their own bodies; GMs can roll for NPCs and offline players. Click-time authorization, duplicate prevention, and submitted/received states keep buttons consistent. Cancelled roll dialogs can be retried. Self-only rolls are whispered to the player and GM so the GM can resolve the swap; other roll modes remain unchanged.
 
-Character names remain the default, optional player labels remain available, and names still revert without overriding name-display settings.
-
-All 21 automated tests pass, including linked and unlinked destinations, offline and nonparticipating players, exact restoration, and failure recovery. Live Foundry testing is pending.
+All 23 automated tests pass, including player-side clicks for checks and saves, GM acceptance, unauthorized clicks, cancellation, and duplicate prevention. Live Foundry testing is pending.
