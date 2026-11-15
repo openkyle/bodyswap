@@ -61,8 +61,9 @@ function openAssignments() {
     const users = game.users.filter(u => !u.isGM && u.character?.id === token.actorId);
     let reason = '';
     if (!setting('includeEnemies') && !users.length) reason = 'Enable Include enemies to use this body';
-    if (token.actorId && seen.has(token.actorId)) reason = 'Another token uses this Actor';
-    if (!reason && token.actorId) seen.add(token.actorId);
+    const body = token.actor?.uuid;
+    if (body && seen.has(body)) reason = 'Another linked token uses this same body';
+    if (!reason && body) seen.add(body);
     return { token, actorId: token.actorId, reason, label: `${token.name}${users.length ? ` (${users.map(u => u.name).join(', ')})` : ' (GM)'}` };
   });
   const eligible = rows.filter(row => !row.reason);
@@ -168,8 +169,8 @@ async function start(chosenTokens, chosenPlan) {
       const base = game.actors.get(actor.id);
       const users = game.users.filter(u => !u.isGM && u.character?.id === actor.id).map(u => u.id);
       if (!setting('includeEnemies') && !users.length) continue;
-      if (seenActors.has(actor.id)) throw new Error('Select only one token per underlying Actor.');
-      seenActors.add(actor.id);
+      if (seenActors.has(actor.uuid)) throw new Error('Select only one linked token per Actor. Unlinked tokens can participate separately.');
+      seenActors.add(actor.uuid);
       for (const id of users) {
         if (seenUsers.has(id)) throw new Error('A player cannot participate through multiple bodies.');
         seenUsers.add(id);
@@ -229,15 +230,22 @@ async function applySwap(session) {
     return;
   }
   const participatingUsers = mappings.flatMap(m => m.source.users);
-  const updates = new Map();
+  // Shared sidebar Actors must grant access to every incoming player. Apply
+  // those first, then the individual synthetic Actors for scene-token access.
+  const baseOwners = new Map();
+  const tokenOwners = new Map();
   for (const { source, target } of mappings) {
-    for (const uuid of new Set([target.base, target.actor])) {
-      const actor = await fromUuid(uuid);
-      if (!actor) throw new Error(`Missing Actor for ${target.name}.`);
-      session.actors.push({ uuid, ownership: copy(actor.ownership) });
-      updates.set(uuid, transferredOwnership(actor.ownership, participatingUsers, source.users));
-    }
+    if (!baseOwners.has(target.base)) baseOwners.set(target.base, new Set());
+    for (const id of source.users) baseOwners.get(target.base).add(id);
+    if (target.actor !== target.base) tokenOwners.set(target.actor, source.users);
     for (const id of source.users) session.users.push({ id, character: game.users.get(id).character?.id ?? null });
+  }
+  const updates = new Map();
+  for (const [uuid, owners] of [...baseOwners, ...tokenOwners]) {
+    const actor = await fromUuid(uuid);
+    if (!actor) throw new Error(`Missing Actor: ${uuid}`);
+    session.actors.push({ uuid, ownership: copy(actor.ownership) });
+    updates.set(uuid, transferredOwnership(actor.ownership, participatingUsers, [...owners]));
   }
   session.phase = 'applying';
   await save(session); // Persist the entire recovery journal before mutations.

@@ -1,5 +1,7 @@
-Body Swap 0.3.0 preview for Foundry VTT 11 build 315 and D&D 5e 2.4.1.
+Body Swap 0.3.1 preview for Foundry VTT 11 build 315 and D&D 5e 2.4.1.
 
-Includes random and manual body assignments, portrait previews, mutual pairing, exclusions, Constitution resistance, exact permission restoration, and timed/manual reversion.
+Unlinked scene tokens from the same sidebar Actor can now participate as separate bodies, retaining their individual HP, items, and effects. Incoming players receive combined access to the shared sidebar Actor and individual permissions on their destination scene bodies. Reversion restores original permissions and character assignments.
 
-Fourteen automated tests pass. Live Foundry testing is pending. Shared-account controller selection is deferred.
+Linked tokens sharing one Actor still represent one body. A player account cannot participate through multiple starting bodies. Other tokens using the shared sidebar Actor may inherit its broader access.
+
+All 16 automated tests pass, including shared-Actor swaps and restoration. Live Foundry testing is pending.

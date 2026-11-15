@@ -55,7 +55,7 @@ async function harness({ resistance = false, enemy = false } = {}) {
   const source = (await fs.readFile(new URL('../body-swap/scripts/body-swap.js', import.meta.url), 'utf8')).replace(/^import .*\n/, '');
   vm.runInContext(source, context);
   hooks.get('init')(); settings.set('resistance', resistance); hooks.get('ready')();
-  return { api: module.api, settings, actors, players, tokens, hooks, messages, interval, gm, canvas, game: context.game, getDialog: () => dialog };
+  return { api: module.api, documents, settings, actors, players, tokens, hooks, messages, interval, gm, canvas, game: context.game, getDialog: () => dialog };
 }
 
 test('swaps control and sheets, then restores exact original permissions without reverting HP', async () => {
@@ -236,4 +236,67 @@ test('active chat card shows countdown, hides player controls, and reverts as GM
   h.hooks.get('renderChatMessage')(message, html);
   assert.match(label.textContent, /Ended/);
   assert.equal(button.hidden, true);
+});
+
+
+test('unlinked bodies share sidebar access without losing individual control or HP', async () => {
+  const h = await harness({ enemy: true });
+  h.settings.set('includeEnemies', true);
+  const base = h.actors[2];
+  const synthetic = [0, 1].map(i => ({
+    ...base, uuid: `Scene.s.Token.n${i}.Actor.${base.id}`,
+    ownership: { default: 0, observer: 2 }, system: { hp: 10 + i }
+  }));
+  const enemies = synthetic.map((actor, i) => ({
+    uuid: `Scene.s.Token.n${i}`, name: `Goblin ${i}`, actor,
+    actorId: base.id, actorLink: false
+  }));
+  for (const document of [...synthetic, ...enemies]) h.documents.set(document.uuid, document);
+  const tokens = [...h.tokens.slice(0, 2), ...enemies];
+  h.canvas.tokens.placeables = tokens.map(document => ({ document }));
+  const originals = structuredClone([...h.actors, ...synthetic].map(a => a.ownership));
+  await h.api.configure();
+  const dialog = h.getDialog();
+  assert.doesNotMatch(dialog.content, /Another linked token/);
+  const selects = tokens.map(t => ({ dataset: { swapSource: t.uuid }, value: '' }));
+  let change;
+  dialog.render({ find(selector) { return {
+    each(fn) { (selector === '[data-swap-source]' ? selects : []).forEach((el, i) => fn(i, el)); },
+    on(_, fn) { if (selector === '[data-swap-source]') change = fn; }
+  }; } });
+  for (const [source, target] of [[0, 2], [1, 3], [2, 0], [3, 1]]) {
+    selects[source].value = tokens[target].uuid;
+    change({ currentTarget: selects[source] });
+  }
+  dialog.buttons.apply.callback();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(h.api.status().phase, 'active');
+  assert.equal(base.ownership.u0, 3);
+  assert.equal(base.ownership.u1, 3);
+  assert.equal(synthetic[0].ownership.u0, 3);
+  assert.equal(synthetic[0].ownership.u1, 0);
+  assert.equal(synthetic[1].ownership.u1, 3);
+  assert.equal(synthetic[1].ownership.u0, 0);
+  assert.deepEqual(h.players.slice(0, 2).map(p => p.character.id), [base.id, base.id]);
+  const journal = h.api.status().actors;
+  assert.equal(journal.filter(a => a.uuid === base.uuid).length, 1);
+  assert.ok(journal.findIndex(a => a.uuid === base.uuid) < journal.findIndex(a => a.uuid === synthetic[0].uuid));
+  synthetic[0].system.hp = 4;
+  await h.api.revert();
+  assert.deepEqual([...h.actors, ...synthetic].map(a => a.ownership), originals);
+  assert.deepEqual(h.players.slice(0, 2).map(p => p.character.id), ['a0', 'a1']);
+  assert.deepEqual(synthetic.map(a => a.system.hp), [4, 11]);
+  // Quick swapping uses the same token-level eligibility as the editor.
+  h.canvas.tokens.controlled = tokens.map(document => ({ document }));
+  await h.api.start();
+  assert.equal(h.api.status().entries.length, 4);
+  await h.api.revert();
+});
+
+test('multiple linked tokens for one body remain rejected', async () => {
+  const h = await harness({ enemy: true });
+  h.settings.set('includeEnemies', true);
+  h.canvas.tokens.controlled.push({ document: { ...h.tokens[2], uuid: 'Scene.s.Token.extra' } });
+  await assert.rejects(h.api.start(), /one linked token per Actor/);
+  assert.equal(h.api.status().phase, undefined);
 });

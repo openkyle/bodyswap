@@ -1,4 +1,4 @@
-# Body Swap — preview 0.3.0
+# Body Swap — preview 0.3.1
 
 Target: Foundry VTT **11 build 315**, D&D 5e **2.4.1**. This preview has automated logic tests, but has not yet been tested inside a running Foundry world.
 
@@ -22,7 +22,7 @@ Select at least two eligible tokens and run **Swap Selected**. Each participant 
 
 With **zero or one token selected**, the same macro opens **Assign Bodies** for the current scene. Character names appear in a responsive grid with a destination dropdown under each name. The initial assignment is randomized. Change any destination and its previous occupant automatically receives the freed destination; all dropdowns update immediately, with no duplicate destinations. Click **Enable Body Swap** to apply the displayed assignments, or **Randomize** to reshuffle. Closing or cancelling the window changes nothing.
 
-Assignments to the same body are labeled **Stays in this body** and are not swapped. This allows individual characters to sit out. Ineligible scene tokens remain visible with an explanation; enable **Include enemies** in settings to use unassigned NPC bodies. The window respects the same eligibility and duplicate-Actor restrictions as quick swapping. It can also be opened directly with `await game.modules.get("body-swap").api.configure();`.
+Assignments to the same body are labeled **Stays in this body** and are not swapped. This allows individual characters to sit out. Ineligible scene tokens remain visible with an explanation; enable **Include enemies** in settings to use unassigned NPC bodies. The window respects the same eligibility and linked-token and player-assignment restrictions as quick swapping. It can also be opened directly with `await game.modules.get("body-swap").api.configure();`.
 
 Each card shows an 80-pixel destination portrait above a centered 56-pixel original portrait, with names and an upward arrow. Destination portraits update with dropdown changes, including displaced assignments. Images use scene token artwork, falling back to Actor portraits for video textures and a placeholder for unavailable images. These previews only appear in the interface; scene artwork is unchanged.
 
@@ -44,7 +44,7 @@ During a swap, participating accounts lose access to other participating bodies 
 
 Eligibility is based on each player's **assigned character**, not every character they can access. This prevents shared party ownership from accidentally treating every player as every character's controller. Foundry assigns only one character per account: a partner's additional character sharing the same login is not automatically recognized as a separate player-controlled participant in this preview. Multiple accounts assigned to the same body travel together. With Include enemies enabled, unassigned bodies participate as GM-controlled minds.
 
-Ownership changes affect the underlying world Actor, so other tokens using that same Actor can also reflect access changes. Select only one token per underlying Actor; duplicate selection is rejected. One swap or pending request may exist per world.
+Unlinked scene tokens from the same sidebar Actor can participate as separate bodies, retaining their own HP, items, and effects. The shared sidebar Actor grants ownership to all incoming players; each participating unlinked token receives its own incoming controller permissions. Other tokens using that sidebar Actor may inherit the broader access. Linked tokens sharing an Actor still represent one body, so select only one of those. A player account cannot enter the same swap through multiple starting bodies. One swap or pending request may exist per world.
 
 ## Actor lookup and recovery
 
@@ -54,7 +54,7 @@ Recovery data is saved before changing permissions. Failed recovery retains the 
 
 ## Verification
 
-Run `node --test tests/body-swap.test.mjs` from the source workspace. Fourteen tests cover random cycles, control transfer, exact permission restoration including shared access, resistance, default enemy exclusion, mutation failure recovery, timer expiry, assignment displacement, cycle reconnection, macro routing, execution of the editor's displayed plan, mutual pairing, exclusions through reshuffling, and chat countdown/reversion controls. These are mocked integration tests; they do not substitute for testing native Foundry documents, the rendered Dialog, and connected player clients.
+Run `node --test tests/body-swap.test.mjs` from the source workspace. Tests cover random cycles, control transfer, exact permission restoration including shared access, resistance, default enemy exclusion, mutation failure recovery, timer expiry, assignment displacement, cycle reconnection, macro routing, execution of the editor's displayed plan, mutual pairing, exclusions through reshuffling, and chat countdown/reversion controls. These are mocked integration tests; they do not substitute for testing native Foundry documents, the rendered Dialog, and connected player clients.
 
 Before release, test with a GM and separate player browsers in a test world: linked and unlinked tokens, shared ownership, Constitution check/save dialogs, two-player swaps, NPC participation, Actor compendium lookup, movement and double-click sheet access, reload recovery, and timed/manual reversion.
 
