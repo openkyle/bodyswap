@@ -282,10 +282,10 @@ test('unlinked bodies share sidebar access without losing individual control or 
   assert.equal(h.api.status().phase, 'active');
   assert.equal(enemies[0].name, 'Body 0');
   assert.equal(enemies[1].name, 'Body 1');
-  assert.equal(base.prototypeToken.name, 'Body 0 / Body 1');
+  assert.equal(base.prototypeToken.name, 'Prototype 2');
   assert.equal(h.tokens[0].name, 'Goblin 0');
   assert.equal(h.tokens[1].name, 'Goblin 1');
-  assert.equal(h.actors[0].prototypeToken.name, 'Goblin 0');
+  assert.equal(h.actors[0].prototypeToken.name, 'Prototype 0');
   assert.doesNotMatch(h.messages.at(-1).content, /GM \(/);
   assert.deepEqual(enemies.map(t => t.displayName), [0, 0]);
   assert.equal(base.ownership.u0, 3);
@@ -355,7 +355,7 @@ test('chat portraits and temporary names follow bodies without overriding name v
     const incomingName = names[h.players.indexOf(incoming)];
     assert.equal(h.tokens[i].name, incomingName);
     assert.equal(h.tokens[i].displayName, [0, 20, 50][i]);
-    assert.equal(h.actors[i].prototypeToken.name, incomingName);
+    assert.equal(h.actors[i].prototypeToken.name, prototypes[i]);
     assert.equal(existing[i].name, incomingName);
   }
   const added = { uuid: 'Combat.later.Combatant.new', token: h.tokens[0], name: h.tokens[0].name, update: updateDocument };
@@ -401,7 +401,7 @@ test('optional player labels append accounts while default labels use character 
   await h.api.start();
   const brothersBody = h.tokens.find(t => t.actorId === h.players[0].character.id);
   assert.equal(brothersBody.name, 'Brother (Josh)');
-  assert.equal(brothersBody.actor.prototypeToken.name, 'Brother (Josh)');
+  assert.equal(brothersBody.actor.prototypeToken.name, `Prototype ${h.actors.indexOf(brothersBody.actor)}`);
   assert.ok(h.messages.at(-1).content.includes('Brother (Josh)'));
   assert.ok(h.tokens.some(t => t.name === 'Body 2'));
   assert.doesNotMatch(h.messages.at(-1).content, /GM \(/);
@@ -733,4 +733,67 @@ test('everyone can inspect the timer dropdown; only the GM can revert or quick s
   await new Promise(resolve => setTimeout(resolve, 10));
   assert.equal(h.api.status().phase, undefined);
   assert.deepEqual(h.tokens.map(t => t.name), ['Body 0', 'Body 1', 'Body 2']);
+});
+
+
+test('fresh sidebar drops keep original names and permissions independently of the swapped body', async () => {
+  for (const linked of [false, true]) {
+    const h = await harness({ enemy: true });
+    h.settings.set('includeEnemies', true);
+    h.settings.set('sharedVision', true);
+    h.actors[2].prototypeToken.name = 'NetherMote';
+    h.actors[2].ownership = { default: 0, observer: 2 };
+    h.canvas.tokens.controlled = [h.tokens[0], h.tokens[2]].map(document => ({ document }));
+    await h.api.start();
+    assert.equal(h.tokens[2].name, 'Body 0');
+    assert.equal(h.actors[2].prototypeToken.name, 'NetherMote');
+    const fresh = {
+      actorId: 'a2', actorLink: linked, name: h.actors[2].prototypeToken.name,
+      delta: { system: { hp: 17 }, ownership: { u0: 3 } },
+      toObject() { return { delta: structuredClone(this.delta) }; },
+      updateSource: updateDocument
+    };
+    h.hooks.get('preCreateToken')(fresh);
+    assert.equal(fresh.name, 'NetherMote');
+    assert.equal(fresh.actorLink, false);
+    assert.equal(fresh.delta.system.hp, 17);
+    for (const player of h.players) assert.equal(fresh.delta.ownership[player.id], 0);
+    assert.equal(fresh.delta.ownership.observer, 2);
+    assert.equal(h.actors[2].ownership.u0, 3);
+    assert.equal(h.tokens[2].name, 'Body 0');
+    fresh.delta.system.hp = 9;
+    await h.api.revert();
+    assert.equal(fresh.name, 'NetherMote');
+    assert.equal(fresh.delta.system.hp, 9);
+    assert.equal(h.tokens[2].name, 'Body 2');
+    // Outside a swap, the hook leaves normal linked-token behavior alone.
+    fresh.actorLink = true;
+    h.hooks.get('preCreateToken')(fresh);
+    assert.equal(fresh.actorLink, true);
+  }
+});
+
+test('legacy prototype names repair on GM reconnect without ending the active swap', async () => {
+  const h = await harness();
+  await h.api.start();
+  const id = h.api.status().id;
+  const tokenNames = h.tokens.map(t => t.name);
+  const original = h.actors[0].prototypeToken.name;
+  const session = h.settings.get('state');
+  session.names.push({ kind: 'prototype', uuid: h.actors[0].uuid,
+    original: { 'prototypeToken.name': original }, applied: { 'prototypeToken.name': 'Brother' } });
+  h.actors[0].prototypeToken.name = 'Brother';
+  const fresh = { actorId: 'a0', actorLink: false, name: 'Brother', delta: {},
+    toObject() { return { delta: this.delta }; }, updateSource: updateDocument };
+  h.hooks.get('preCreateToken')(fresh);
+  assert.equal(fresh.name, original);
+  h.hooks.get('ready')();
+  await new Promise(resolve => setTimeout(resolve, 15));
+  assert.equal(h.actors[0].prototypeToken.name, original);
+  assert.equal(h.api.status().id, id);
+  assert.equal(h.api.status().phase, 'active');
+  assert.deepEqual(h.tokens.map(t => t.name), tokenNames);
+  assert.ok(h.api.status().names.every(record => record.kind !== 'prototype'));
+  await h.api.revert();
+  assert.equal(h.actors[0].prototypeToken.name, original);
 });

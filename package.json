@@ -1,6 +1,6 @@
 {
   "name": "foundry-body-swap",
-  "version": "0.3.10",
+  "version": "0.3.11",
   "private": true,
   "scripts": {
     "test": "node --test tests/body-swap.test.mjs"

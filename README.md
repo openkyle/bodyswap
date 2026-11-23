@@ -1,4 +1,4 @@
-# Body Swap — preview 0.3.10
+# Body Swap — preview 0.3.11
 
 Target: Foundry VTT **11 build 315**, D&D 5e **2.4.1**. This preview has automated logic tests, but has not yet been tested inside a running Foundry world.
 
@@ -18,7 +18,7 @@ For manual installation:
 
 ## Use
 
-Select at least two eligible tokens and run **Swap Selected**. Each participant moves to a different selected body; the chat card shows `original character name → destination portrait and body name`, without repeating the original portrait. The physical tokens stay in place. During the swap, each destination token takes the incoming character’s original scene-token name, including for enemies. Character names are the default. Enable **Show player names** in module settings to append account names, such as **Brother (Josh)**, in assignments, chat, and temporary token/initiative names. This option is off by default and applies to new swaps. Existing name-display settings are left untouched. Existing initiative entries use the same name. Prototype token names are updated too; a shared sidebar Actor lists its incoming names separated by `/`. Original token names, prototype names, and existing initiative aliases are restored on reversion. Initiative entries added during the swap have inherited temporary names restored to the original body name. Players receive ownership of their destination Actor and their assigned character changes. Double-clicking the destination token opens its sheet using Foundry's native ownership behavior.
+Select at least two eligible tokens and run **Swap Selected**. Each participant moves to a different selected body; the chat card shows `original character name → destination portrait and body name`, without repeating the original portrait. The physical tokens stay in place. During the swap, each destination token takes the incoming character’s original scene-token name, including for enemies. Character names are the default. Enable **Show player names** in module settings to append account names, such as **Brother (Josh)**, in assignments, chat, and temporary token/initiative names. This option is off by default and applies to new swaps. Existing name-display settings are left untouched. Existing initiative entries use the same name. Sidebar prototype names remain unchanged. Original scene-token names and existing initiative aliases are restored on reversion. Initiative entries added during the swap have inherited temporary names restored to the original body name. Players receive ownership of their destination Actor and their assigned character changes. Double-clicking the destination token opens its sheet using Foundry's native ownership behavior.
 
 With **zero or one token selected**, the same macro opens **Assign Bodies** for the current scene. Character names appear in a responsive grid with a destination dropdown under each name. The initial assignment is randomized. Change any destination and its previous occupant automatically receives the freed destination; all dropdowns update immediately, with no duplicate destinations. Click **Enable Body Swap** to apply the displayed assignments, or **Randomize** to reshuffle. Closing or cancelling the window changes nothing.
 
@@ -55,6 +55,12 @@ Enable **Shared vision** in module settings to preserve all existing permissions
 Eligibility is based on each player's **assigned character**, not every character they can access. This prevents shared party ownership from accidentally treating every player as every character's controller. Foundry assigns only one character per account: a partner's additional character sharing the same login is not automatically recognized as a separate player-controlled participant in this preview. Multiple accounts assigned to the same body travel together. With Include enemies enabled, unassigned bodies participate as GM-controlled minds.
 
 Unlinked scene tokens from the same sidebar Actor can participate as separate bodies, retaining their own HP, items, and effects. The shared sidebar Actor grants ownership to all incoming players; each participating unlinked token receives its own incoming controller permissions. Other tokens using that sidebar Actor may inherit the broader access. Linked tokens sharing an Actor still represent one body, so select only one of those. A player account cannot enter the same swap through multiple starting bodies. One swap or pending request may exist per world.
+
+## Fresh tokens during a swap
+
+Dragging an affected Actor from the sidebar creates a fresh body with its original prototype name and original permissions, rather than another copy of the swapped controller. New tokens from affected Actors are created unlinked during the swap so their ownership is independent of the shared sidebar Actor. Other token data and name-display settings are preserved. Reversion does not rename or roll back those fresh bodies. They may participate in a later manual or automatic swap normally.
+
+On GM reconnect, prototype names changed by earlier releases are restored from the saved recovery data without ending the current scene swap. Existing fresh tokens dropped before this fix are not automatically renamed.
 
 ## Actor lookup and recovery
 

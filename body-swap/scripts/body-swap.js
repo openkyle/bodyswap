@@ -168,7 +168,7 @@ Hooks.once('init', () => {
   const register = (key, name, type, defaultValue, hint, extra = {}) => game.settings.register(ID, key, {
     name, hint, scope: 'world', config: true, type, default: defaultValue, ...extra
   });
-  const scheduleChanged = () => { if (primary()) serialized(syncAutomaticSchedule); };
+  const scheduleChanged = () => { if (primary()) serialized(async () => { await restoreLegacyPrototypes(); await syncAutomaticSchedule(); }); };
   register('automaticSwaps', 'Automatic swaps', Boolean, false, 'Randomly reshuffle all eligible tokens on the currently active scene at a real-world interval. Include enemies controls NPC participation. Existing swaps revert first. Requires an active GM; pending Constitution rolls delay the next swap. Turning this off stops future swaps, not the current swap.', { onChange: scheduleChanged });
   register('automaticMinutes', 'Automatic swaps every X minutes (real time)', Number, 30, 'Recommended: 30 minutes. Minimum: 1 minute. Changing this restarts the countdown. No manual swap is needed to start the schedule.', { onChange: scheduleChanged });
   game.settings.register(ID, 'automaticSchedule', { scope: 'world', config: false, type: Object, default: {} });
@@ -182,6 +182,41 @@ Hooks.once('init', () => {
   register('duration', 'Revert after seconds', Number, 0, 'Real-world seconds, starting when bodies swap. Zero means manual reversion. An active GM is needed; expired swaps revert when a GM reconnects.');
   game.settings.register(ID, 'state', { scope: 'world', config: false, type: Object, default: {} });
 });
+
+// A new token is a new body, not another copy of the mind occupying a
+// participating token. Keep its permissions independent of the shared sidebar Actor.
+Hooks.on('preCreateToken', token => {
+  const session = state();
+  if (!session.phase) return;
+  const actor = game.actors.get(token.actorId);
+  const original = session.actors?.find(record => record.uuid === actor?.uuid);
+  if (!actor || !original) return;
+  const delta = token.toObject().delta ?? {};
+  const ownership = copy(original.ownership);
+  const ids = new Set([...Object.keys(actor.ownership), ...Object.keys(delta.ownership ?? {}), ...game.users.map(user => user.id)]);
+  for (const id of ids) if (id !== 'default') ownership[id] = original.ownership[id] ?? original.ownership.default ?? 0;
+  const changes = { actorLink: false, 'delta.ownership': ownership };
+  // Handle a drop from an older release before the GM has repaired its prototype.
+  const legacy = session.names?.find(record => record.kind === 'prototype' && record.uuid === actor.uuid);
+  if (legacy && token.name === legacy.applied['prototypeToken.name']) changes.name = legacy.original['prototypeToken.name'];
+  token.updateSource(changes);
+});
+
+async function restoreLegacyPrototypes() {
+  requireGM();
+  const session = state();
+  if (session.phase !== 'active') return;
+  const records = session.names?.filter(record => record.kind === 'prototype') ?? [];
+  if (!records.length) return;
+  for (const record of records) {
+    const actor = await fromUuid(record.uuid);
+    if (!actor) throw new Error('Cannot restore a missing sidebar Actor prototype.');
+    if (actor.prototypeToken.name === record.applied['prototypeToken.name']) await actor.update(record.original);
+  }
+  // Keep the active scene swap, but stop managing sidebar prototype names.
+  session.names = session.names.filter(record => record.kind !== 'prototype');
+  await save(session);
+}
 
 async function resolveActor(token, session) {
   if (token.actor) return token.actor;
@@ -401,7 +436,6 @@ async function applySwap(session) {
   }
   // Journal cosmetic changes before any writes, alongside permission recovery.
   session.names = [];
-  const prototypeNames = new Map();
   for (const { source, target } of mappings) {
     const token = await fromUuid(target.token);
     const name = mindName(source);
@@ -411,14 +445,6 @@ async function applySwap(session) {
     for (const combatant of combatants().filter(c => c.token?.uuid === token.uuid)) {
       session.names.push({ kind: 'combatant', uuid: combatant.uuid, original: { name: combatant.name }, applied: { name } });
     }
-    if (!prototypeNames.has(target.base)) prototypeNames.set(target.base, new Set());
-    prototypeNames.get(target.base).add(name);
-  }
-  for (const [uuid, names] of prototypeNames) {
-    const actor = await fromUuid(uuid);
-    session.names.push({ kind: 'prototype', uuid,
-      original: { 'prototypeToken.name': actor.prototypeToken.name },
-      applied: { 'prototypeToken.name': [...names].join(' / ') } });
   }
   session.phase = 'applying';
   await save(session); // Persist the entire recovery journal before mutations.
@@ -591,11 +617,12 @@ Hooks.once('ready', () => {
   };
   if (game.system.id !== 'dnd5e') ui.notifications.error('Body Swap requires D&D 5e.');
   globalThis.document?.querySelectorAll('#chat').forEach(mountChatTimer);
-  if (primary()) serialized(syncAutomaticSchedule);
+  if (primary()) serialized(async () => { await restoreLegacyPrototypes(); await syncAutomaticSchedule(); });
   // A persisted journal also supports manual recovery after browser/server interruption.
   setInterval(() => {
     if (!primary()) return;
     serialized(async () => {
+      await restoreLegacyPrototypes();
       const session = state();
       if (session.phase === 'active' && session.expires && Date.now() >= session.expires) await revert();
       if (session.phase === 'rolling') for (const message of game.messages.contents) await acceptRoll(message);
