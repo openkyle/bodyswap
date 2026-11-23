@@ -38,7 +38,7 @@ function chatTimerText() {
   let text = 'Body Swap — no active swap';
   if (session.phase === 'active') text = session.expires
     ? `Body Swap — ${Date.now() >= session.expires ? 'Time expired — awaiting GM' : remainingTime(session.expires) + ' remaining'}`
-    : 'Body Swap — active (manual reversion)';
+    : 'Body Swap — active';
   else if (session.phase === 'rolling') text = 'Body Swap — waiting for Constitution rolls';
   else if (session.phase) text = 'Body Swap — restoring or preparing bodies';
   if (setting('automaticSwaps')) {
