@@ -636,17 +636,38 @@ test('automatic swaps skip duplicate linked bodies and empty scenes without open
   await h.api.revert();
 });
 
+function timerRoot() {
+  const document = { createElement(tag) { return {
+    tag, dataset: {}, style: {}, children: [], innerHTML: '', ownText: '',
+    set textContent(value) { this.ownText = value; },
+    get textContent() { return this.ownText + this.children.map(child => child.textContent).join(''); },
+    append(...children) { this.children.push(...children); },
+    replaceChildren() { this.children = []; this.innerHTML = ''; },
+    addEventListener(_, fn) { this.click = () => fn({ preventDefault() {}, stopPropagation() {} }); },
+    querySelector(selector) {
+      const key = selector.startsWith('[data-') ? selector.slice(6, -1).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase()) : null;
+      for (const child of this.children) {
+        if (key ? key in child.dataset : child.tag === selector) return child;
+        const result = child.querySelector(selector);
+        if (result) return result;
+      }
+      return null;
+    }
+  }; } };
+  const root = document.createElement('root');
+  root.ownerDocument = document;
+  const query = root.querySelector.bind(root);
+  root.querySelector = selector => selector === '#chat-controls' ? { parentNode: { insertBefore: panel => root.append(panel) } } : query(selector);
+  return root;
+}
+
 test('persistent chat timer sits outside messages and survives clearing, rerendering and reversion', async () => {
   const h = await harness();
   h.settings.set('duration', 120);
   h.settings.set('automaticSwaps', true);
   await h.api.start();
-  const panels = [];
-  const parent = { insertBefore(panel) { panels.push(panel); } };
-  const root = {
-    querySelector(selector) { return selector === '[data-body-swap-timer]' ? panels[0] : selector === '#chat-controls' ? { parentNode: parent } : null; },
-    ownerDocument: { createElement() { return { dataset: {}, style: {}, setAttribute() {} }; } }
-  };
+  const root = timerRoot();
+  const panels = root.children;
   h.game.user = h.players[0];
   h.hooks.get('renderChatLog')({}, [root]);
   assert.match(panels[0].textContent, /2:00 remaining/);
@@ -664,4 +685,52 @@ test('persistent chat timer sits outside messages and survives clearing, rerende
   h.hooks.get('renderChatLog')({}, [root]);
   assert.match(panels[0].textContent, /no active swap/);
   assert.doesNotMatch(panels[0].textContent, /Automatic swap/);
+});
+
+
+test('everyone can inspect the timer dropdown; only the GM can revert or quick swap', async () => {
+  const h = await harness();
+  await h.api.start();
+  const firstId = h.api.status().id;
+  const root = timerRoot();
+  h.game.user = h.players[0];
+  h.hooks.get('renderChatLog')({}, [root]);
+  const panel = root.children[0];
+  assert.equal(panel.tag, 'details');
+  panel.open = true;
+  const details = panel.querySelector('[data-body-swap-details]');
+  assert.equal(details.querySelector('button'), null);
+  const renderedRows = details.children[0].innerHTML;
+  for (const record of h.api.status().names.filter(r => r.kind === 'token')) {
+    assert.ok(renderedRows.includes(record.applied.name));
+    assert.ok(renderedRows.includes(record.original.name));
+  }
+  h.hooks.get('renderChatLog')({}, [root]);
+  assert.equal(panel.open, true);
+  assert.equal(h.api.status().id, firstId);
+  h.game.user = h.gm;
+  h.hooks.get('renderChatLog')({}, [root]);
+  let actions = details.children.filter(el => el.tag === 'button');
+  assert.deepEqual(actions.map(b => b.textContent), ['Revert now', 'Quick swap']);
+  assert.ok(actions.every(b => !b.disabled));
+  // Client-side hiding is also backed by a GM check when an action executes.
+  h.game.user = h.players[0];
+  actions[0].click();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(h.api.status().id, firstId);
+  h.game.user = h.gm;
+  actions[1].click();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(h.api.status().phase, 'active');
+  assert.notEqual(h.api.status().id, firstId);
+  assert.equal(panel.open, true);
+  // Old action handlers cannot affect a newer swap.
+  actions[0].click();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(h.api.status().phase, 'active');
+  actions = details.children.filter(el => el.tag === 'button');
+  actions[0].click();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(h.api.status().phase, undefined);
+  assert.deepEqual(h.tokens.map(t => t.name), ['Body 0', 'Body 1', 'Body 2']);
 });

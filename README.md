@@ -1,4 +1,4 @@
-# Body Swap — preview 0.3.8
+# Body Swap — preview 0.3.9
 
 Target: Foundry VTT **11 build 315**, D&D 5e **2.4.1**. This preview has automated logic tests, but has not yet been tested inside a running Foundry world.
 
@@ -38,7 +38,7 @@ The optional timer measures real-world seconds from the completed swap. Zero dis
 
 ## Persistent timer and automatic swaps
 
-A persistent timer panel sits at the bottom of chat, above the input controls and outside the message log. It remains after chat messages are cleared and shows the current swap countdown, manual-reversion status, or waiting-for-rolls status. When idle it stays visible with “no active swap.” It also shows the next automatic-swap countdown when enabled.
+A persistent, expandable timer panel sits at the bottom of chat, above the input controls and outside the message log. It remains after chat messages are cleared and shows the current swap countdown, manual-reversion status, or waiting-for-rolls status. When idle it stays visible with “no active swap.” It also shows the next automatic-swap countdown when enabled. Every player can expand it to view character names pointing to their current body portraits and names. Opening the dropdown never reverts or swaps anything. Separate **Revert now** and **Quick swap** buttons inside are visible only to GMs and executable only by the primary active GM. Quick swap restores the current swap, then randomly swaps eligible bodies on the active scene, respecting Include enemies and Constitution resistance. It is unavailable while rolls or recovery are pending. The dropdown stays open as the timer updates.
 
 Enable **Automatic swaps** in module settings and set **Automatic swaps every X minutes (real time)**. The feature is off by default; the recommended/default interval is **30 minutes**, with a minimum of 1 minute. Enabling the setting starts the countdown immediately; no manual swap is required. Each automatic swap uses all eligible tokens on the currently active world scene, regardless of the GM’s selection or viewed scene. Enable **Include enemies** to include unassigned NPC bodies. Duplicate linked bodies and repeated starting bodies for the same player are skipped. Each run uses a new random plan; manual exclusions and pairings are not retained. Each active swap is restored before the next random swap begins. Constitution resistance and other module options still apply.
 

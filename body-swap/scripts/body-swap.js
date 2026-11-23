@@ -49,18 +49,60 @@ function chatTimerText() {
 }
 function mountChatTimer(root) {
   if (!root?.querySelector) return;
+  const document = root.ownerDocument;
   let panel = root.querySelector('[data-body-swap-timer]');
   if (!panel) {
     const anchor = root.querySelector('#chat-controls') ?? root.querySelector('#chat-form');
     if (!anchor) return;
-    panel = root.ownerDocument.createElement('div');
+    panel = document.createElement('details');
     panel.dataset.bodySwapTimer = '';
-    panel.setAttribute('role', 'timer');
-    panel.style.cssText = 'flex:0 0 auto;position:sticky;bottom:0;z-index:1;padding:8px 10px;margin:4px 0;border:1px solid #80725b;border-radius:6px;background:#29251f;color:#fff1d2;font-weight:600;white-space:pre-line;text-align:center';
-    // Outside the scrolling/deletable message log, above the chat controls.
+    panel.style.cssText = 'flex:0 0 auto;position:sticky;bottom:0;z-index:1;padding:8px 10px;margin:4px 0;border:1px solid #80725b;border-radius:6px;background:#29251f;color:#fff1d2';
+    const summary = document.createElement('summary');
+    summary.style.cssText = 'cursor:pointer;font-weight:600;white-space:pre-line;text-align:center';
+    summary.title = 'Show body assignments';
+    const content = document.createElement('div');
+    content.dataset.bodySwapDetails = '';
+    panel.append(summary, content);
     anchor.parentNode.insertBefore(panel, anchor);
   }
-  panel.textContent = chatTimerText();
+  panel.querySelector('summary').textContent = chatTimerText();
+  const session = state();
+  const rows = (session.names ?? []).filter(record => record.kind === 'token').map(record => ({
+    name: record.applied.name, body: record.original.name,
+    portrait: session.entries?.find(entry => entry.token === record.uuid)?.portrait
+  }));
+  const signature = JSON.stringify([session.id, session.phase, rows, game.user.id, primary()]);
+  if (panel.bodySwapSignature === signature) return;
+  panel.bodySwapSignature = signature;
+  const content = panel.querySelector('[data-body-swap-details]');
+  content.replaceChildren();
+  const list = document.createElement('div');
+  list.style.cssText = 'max-height:35vh;overflow-y:auto;margin:8px 0';
+  list.innerHTML = rows.length ? rows.map(row => `<div style="display:flex;align-items:center;gap:8px;margin:8px 0"><span style="flex:1;min-width:0;overflow-wrap:anywhere">${esc(row.name)}</span><span aria-label="occupies">→</span>${chatPortrait({ name: row.body, portrait: row.portrait })}<span style="flex:1;min-width:0;overflow-wrap:anywhere">${esc(row.body)}</span></div>`).join('')
+    : `<p>${session.phase === 'rolling' ? 'Assignments appear after Constitution rolls are resolved.' : 'No active body assignments.'}</p>`;
+  content.append(list);
+  if (!game.user.isGM) return;
+  const addAction = (label, enabled, action) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = label;
+    button.disabled = !primary() || !enabled;
+    button.title = primary() ? (label === 'Quick swap' ? 'Restore the current swap, then randomly swap all eligible bodies on the active scene.' : 'Restore original bodies, names and permissions.') : 'Only the primary active GM can use this action.';
+    button.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (button.disabled) return;
+      serialized(async () => {
+        requireGM();
+        if (state().id !== session.id) throw new Error('The swap changed. Check the updated body list and try again.');
+        await action();
+        mountChatTimer(root);
+      });
+    });
+    content.append(button);
+  };
+  addAction('Revert now', ['active', 'reverting'].includes(session.phase), revert);
+  addAction('Quick swap', !session.phase || session.phase === 'active', () => swapActiveScene());
 }
 Hooks.on('renderChatLog', (_app, html) => mountChatTimer(html[0] ?? html));
 
@@ -92,8 +134,17 @@ async function runAutomaticSwap() {
   // Wait for resistance and recovery; never stack swaps or replay missed intervals.
   if (current.phase && current.phase !== 'active') return;
   await game.settings.set(ID, 'automaticSchedule', { ...schedule, next: Date.now() + automaticMinutes() * 60000 });
+  await swapActiveScene({ automatic: true });
+}
+async function swapActiveScene({ automatic = false } = {}) {
+  requireGM();
+  const current = state();
+  if (current.phase && current.phase !== 'active') throw new Error('Resolve the pending rolls or recovery before quick swapping.');
   const scene = game.scenes?.active;
-  if (!scene || scene.tokens.size < 2) return;
+  if (!scene || scene.tokens.size < 2) {
+    if (!automatic) ui.notifications.info('The active scene needs at least two eligible bodies.');
+    return;
+  }
   if (current.phase === 'active') await revert();
   // Resolve participants after reversion restores original character assignments.
   const seenActors = new Set(), seenUsers = new Set();
@@ -106,8 +157,11 @@ async function runAutomaticSwap() {
     for (const user of users) seenUsers.add(user.id);
     return true;
   });
-  if (tokens.length < 2) return;
-  await start(tokens, undefined, { automatic: true });
+  if (tokens.length < 2) {
+    if (!automatic) ui.notifications.info('Fewer than two eligible bodies remain. Check Include enemies in settings.');
+    return;
+  }
+  await start(tokens, undefined, { automatic });
 }
 
 Hooks.once('init', () => {
